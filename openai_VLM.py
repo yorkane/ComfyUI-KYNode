@@ -26,6 +26,7 @@ class OpenAICaptionImage:
                 "max_tokens": ("INT", {"default": 300}),
                 "temperature": ("FLOAT", {"default": 0.5}),
                 "base_url": ("STRING", {"default": "http://127.0.0.1:23333"}),
+                "api_key": ("STRING", {"default": "sk-0123456"}),
             },
         }
 
@@ -34,7 +35,7 @@ class OpenAICaptionImage:
     CATEGORY = "openai"
     FUNCTION = "caption"
 
-    def caption(self, image_in, model, system_prompt, caption_prompt, max_tokens, temperature, base_url):
+    def caption(self, image_in, model, system_prompt, caption_prompt, max_tokens, temperature, base_url, api_key):
         # image to base64, image is bwhc tensor
 
         # Convert tensor to PIL Image
@@ -46,7 +47,7 @@ class OpenAICaptionImage:
         img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
         # Set up OpenAI client
-        api_key = os.getenv("OPENAI_API_KEY")
+        #api_key = os.getenv("OPENAI_API_KEY")
         client = openai.OpenAI(api_key=api_key, base_url=base_url)
 
         # Make API call to OpenAI
