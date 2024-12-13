@@ -292,7 +292,7 @@ FILE_CLASS_MAPPINGS = {
     'LoadImagesFromFolder-': LoadImagesFromFolder,
     'FilePathAnalyzer-': FilePathAnalyzer,
     'RegexExtractor-': KY_RegexExtractor,
-    'KY_SaveImageToPath-': KY_SaveImageToPath,
+    'KY_SaveImageToPath': KY_SaveImageToPath,
 }
 
 FILE_NAME_MAPPINGS = {
@@ -300,5 +300,5 @@ FILE_NAME_MAPPINGS = {
     'LoadImagesFromFolder-': 'Load Images From Folder',
     'FilePathAnalyzer-': 'FilePath Analyzer',
     'RegexExtractor-': 'Regex Extractor',
-    'KY_SaveImageToPath-': 'Save Single Image in full path',
+    'KY_SaveImageToPath': 'Save Single Image in full path',
 }
