@@ -29,7 +29,7 @@ class KY_SaveImageToPath(SaveImage):
         saved_paths = []
         #folder_structure = []
         #folder_structure = json.loads(folder_structure)
-        base_directory = path
+        base_directory = os.path.dirname(path)
         full_file_path = path
         images = IMG
 
@@ -42,7 +42,7 @@ class KY_SaveImageToPath(SaveImage):
 
             # Create the full folder path based on the folder structure
             #full_folder_path = self.create_folder_path(base_directory, [])
-            #os.makedirs(full_folder_path, exist_ok=True)
+            os.makedirs(base_directory, exist_ok=True)
 
             # Create the file name and ensure it doesn't overwrite existing files
             #index = 0 + i
@@ -65,8 +65,6 @@ class KY_SaveImageToPath(SaveImage):
 
             saved_paths.append(path)
             break
-        #return (", ".join(saved_paths),)
-        #results = (", ".join(saved_paths))
         return {
             "ui": {
                 #"images": results['ui']['IMG']
@@ -74,12 +72,5 @@ class KY_SaveImageToPath(SaveImage):
             },
             "result": (IMG,)
         }
-    def create_folder_path(self, base_directory, folder_structure):
-        path = base_directory
-        for folder in folder_structure:
-            path = os.path.join(path, folder['name'])
-            for child in folder['children']:
-                path = self.create_folder_path(path, [child])
-        return path
 
 
