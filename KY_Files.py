@@ -161,7 +161,7 @@ class FilePathAnalyzer:
         file_path = file_path.strip('"')
         path = Path(file_path)
 
-        parent_dir = str(path.parent)
+        parent_dir = str(path.parent) + '/'
         file_stem = path.stem
         file_extension = path.suffix
         full_path = str(path.absolute())
@@ -227,25 +227,33 @@ class KY_RegexReplace:
 class KY_SaveImageToPath:
     @classmethod
     def INPUT_TYPES(s):
-        return {"required":
-                    {"IMG": ("IMAGE",),
-                     "path": ("STRING", {"default": "ComfyUI.png"})},
-                "hidden":
-                    {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"}
-                }
+        return {
+            "required": {
+                    "IMG": ("IMAGE",),
+                    "full_file_path": ("STRING", {"default": "ComfyUI.png"}),
+                    "quality": ("INT", {"default": 100, "min": 1, "max": 100}),
+                    "extension": (['webp', 'png', 'jpg'],),
+            },
+            "optional": {
+                "lossless_webp": ("BOOLEAN", {"default": True}),
+                "optimize": ("BOOLEAN", {"default": True}),
+            },
+                "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"}
+        }
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "save_image_to_path"
     OUTPUT_NODE = True
     CATEGORY = _CATEGORY
 
-    def save_image_to_path(self, IMG, path="ComfyUI.png", prompt=None, extra_pnginfo=None):
+    def save_image_to_path(self, IMG, full_file_path="ComfyUI.png", quality=100, lossless_webp=True, optimize=True, extension='webp', prompt=None, extra_pnginfo=None):
         #results = self.save_images(images, filename_prefix, prompt, extra_pnginfo)
         saved_paths = []
         #folder_structure = []
         #folder_structure = json.loads(folder_structure)
-        base_directory = os.path.dirname(path)
-        full_file_path = path
+        base_directory = os.path.dirname(full_file_path)
+        file_name_without_extension = os.path.splitext(os.path.basename(full_file_path))[0]
+        target_file_path = base_directory + '/' + file_name_without_extension + '.' + extension
         images = IMG
         # Ensure base directory exists
         #os.makedirs(base_directory, exist_ok=True)
@@ -268,7 +276,7 @@ class KY_SaveImageToPath:
             #    index += 1
 
             # Save the image
-            img.save(full_file_path)
+            img.save(target_file_path, quality=quality, lossless=lossless_webp, optimize=optimize)
 
             # Save metadata if provided
             #if metadata:
@@ -277,28 +285,30 @@ class KY_SaveImageToPath:
             #    with open(metadata_file_path, 'w') as f:
             #        f.write(metadata)
 
-            saved_paths.append(path)
+            saved_paths.append(target_file_path)
             break
         return {
             "ui": {
-                "images": path
+                "images": target_file_path
             },
             "result": (IMG,)
         }
 
 
 FILE_CLASS_MAPPINGS = {
-    'ReadImage-': ReadImage,
-    'LoadImagesFromFolder-': LoadImagesFromFolder,
-    'FilePathAnalyzer-': FilePathAnalyzer,
-    'RegexExtractor-': KY_RegexExtractor,
+    'KY_ReadImage-': ReadImage,
+    'KY_LoadImagesFromFolder-': LoadImagesFromFolder,
+    'KY_FilePathAnalyzer-': FilePathAnalyzer,
+    'KY_RegexExtractor-': KY_RegexExtractor,
+    'KY_RegexReplace-': KY_RegexReplace,
     'KY_SaveImageToPath': KY_SaveImageToPath,
 }
 
 FILE_NAME_MAPPINGS = {
-    'ReadImage-': 'Read Image from Path',
-    'LoadImagesFromFolder-': 'Load Images From Folder',
-    'FilePathAnalyzer-': 'FilePath Analyzer',
-    'RegexExtractor-': 'Regex Extractor',
+    'KY_ReadImage-': 'Read Image from Path',
+    'KY_LoadImagesFromFolder-': 'Load Images From Folder',
+    'KY_FilePathAnalyzer-': 'FilePath Analyzer',
+    'KY_RegexExtractor-': 'KY Regex Extractor',
+    'KY_RegexReplace-':  'KY Replace text by regex',
     'KY_SaveImageToPath': 'Save Single Image in full path',
 }
