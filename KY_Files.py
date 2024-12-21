@@ -177,13 +177,13 @@ class KY_SaveImageToPath:
         return {
             "required": {
                 "IMG": ("IMAGE",),
-                "full_file_path": ("STRING", {"default": "ComfyUI.png"}),
+                "full_file_path": ("STRING", {"default": "./ComfyUI.png"}),
                 "quality": ("INT", {"default": 100, "min": 1, "max": 100}),
-                "extension": (["webp", "png", "jpg"],),
+                "extension": (["png", "webp", "jpg"],),
             },
             "optional": {
                 "lossless_webp": ("BOOLEAN", {"default": True}),
-                "optimize": ("BOOLEAN", {"default": True}),
+                "optimize": ("BOOLEAN", {"default": False}),
             },
             "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"},
         }
@@ -199,7 +199,7 @@ class KY_SaveImageToPath:
         full_file_path="ComfyUI.png",
         quality=100,
         lossless_webp=True,
-        optimize=True,
+        optimize=False,
         extension="webp",
         prompt=None,
         extra_pnginfo=None,
