@@ -3,11 +3,14 @@ import io
 import json
 import math
 import os
+import pprint
 import random
 import re
 import time
 import ast
 import operator as op
+import torch
+import logging
 
 _CATEGORY = "KYNode/Utils"
 
@@ -480,12 +483,123 @@ KY_MathExpression accept any value can be convert into numbers:
             ),
         }
 
+class KY_AnyByIndex:
+    @classmethod
+    def INPUT_TYPES(self):
+        return {
+            "required": {
+                "ANY": (any_typ, {"forceInput": True}),
+                "index": ("INT", {"forceInput": False, "default": 0}),
+            }
+        }
+    
+    TITLE = "List: Get By Index"
+    RETURN_TYPES = (any_typ, )
+    INPUT_IS_LIST = True
+    FUNCTION = "run"
+    CATEGORY = _CATEGORY
+    DESCRIPTION = """
+    Get item from any list or batch by index
+    - For single item (int/float/bool/str): return itself
+    - For list (str/int/float/bool): return item by index
+    - For image batch: return single image (keep batch dimension)
+    - For image list: return single image (keep batch dimension)
+    """
+
+    def run(self, ANY, index):
+        idx = index[0]
+
+        # 处理输入列表
+        if isinstance(ANY, list):
+            # 如果是空列表，直接返回
+            if not ANY:
+                return (None,)
+            
+            # 获取第一个元素（因为 INPUT_IS_LIST = True，ANY 总是列表）
+            first_item = ANY[0]
+            
+            # 如果第一个元素是列表（说明输入是列表的列表）
+            if isinstance(first_item, list):
+                if idx >= len(first_item):
+                    raise ValueError(f"Index {idx} out of range for list size {len(first_item)}")
+                return (first_item[idx],)
+            if isinstance(first_item, tuple):
+                return (first_item[idx],)
+            
+            # 如果第一个元素是 tensor
+            if isinstance(first_item, torch.Tensor):
+                if len(first_item.shape) == 4:  # 图像列表
+                    # 检查是否为图像列表的列表
+                    if isinstance(ANY, list) and len(ANY) > 1 and all(isinstance(x, torch.Tensor) and len(x.shape) == 4 for x in ANY):
+                        if idx >= len(ANY):
+                            raise ValueError(f"Index {idx} out of range for image list size {len(ANY)}")
+                        return (ANY[idx],)
+                    # 单个图像的情况
+                    return (first_item[idx:idx+1],)
+            
+            # 如果是基本类型列表
+            if isinstance(first_item, (int, float, bool, str)):
+                if idx >= len(ANY):
+                    raise ValueError(f"Index {idx} out of range for list size {len(ANY)}")
+                return (ANY[idx],)
+            
+            return (first_item,)
+        
+        # 处理基本类型
+        if isinstance(ANY, (int, float, bool, str)):
+            return (ANY,)
+            
+        # 其他情况直接返回
+        return (ANY,)
+
+class KY_AnyToList:
+    @classmethod
+    def INPUT_TYPES(self):
+        return {
+            "required": {
+                "ANY": (any_typ, {"forceInput": True}),
+            }
+        }
+    
+    TITLE = "Any To List"
+    RETURN_TYPES = (any_typ, )
+    OUTPUT_IS_LIST = (True,)
+    FUNCTION = "run"
+    CATEGORY = _CATEGORY
+    DESCRIPTION = """
+    Convert any type into list
+    - For basic types (int/float/bool/str): wrap in list
+    - For list (str/int/float/bool): keep as is
+    - For image batch: convert to list of single images
+    - For tuple: convert to list
+    """
+
+    def run(self, ANY):
+        # 如果输入已经是列表，直接返回
+        if isinstance(ANY, list):
+            # 检查是否为基本类型列表
+            if all(isinstance(x, (int, float, bool, str)) for x in ANY):
+                return (ANY,)
+            return (ANY,)
+        
+        # 如果输入是元组，转换为列表
+        if isinstance(ANY, tuple):
+            return (list(ANY),)
+        
+        # 处理图像批次（tensor）
+        if isinstance(ANY, torch.Tensor) and len(ANY.shape) == 4:
+            return ([ANY[i:i+1] for i in range(ANY.shape[0])],)
+        
+        # 处理基本类型和其他情况，包装成列表
+        return ([ANY],)
 
 UTIL_NODE_CLASS_MAPPINGS = {
     "KY_JoinToString": KY_JoinToString,
     "KY_RegexReplace": KY_RegexReplace,
     "KY_RegexExtractor": KY_RegexExtractor,
     "KY_MathExpression": KY_MathExpression,
+    "KY_AnyByIndex": KY_AnyByIndex,
+    "KY_AnyToList": KY_AnyToList,
 }
 
 UTIL_NODE_NAME_MAPPINGS = {
@@ -493,4 +607,6 @@ UTIL_NODE_NAME_MAPPINGS = {
     "KY_RegexReplace": "Replace text by regex",
     "KY_RegexExtractor": "Extract text by regex",
     "KY_MathExpression": "Math expression eval",
+    "KY_AnyByIndex": "Anything Get By Index",
+    "KY_AnyToList": "Anything To List",
 }

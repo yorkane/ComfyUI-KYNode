@@ -27,7 +27,7 @@ class ReadImage:
     RETURN_NAMES = ('image', 'file_stem')
     FUNCTION = 'execute'
     CATEGORY = _CATEGORY
-    DESCRIPTION = '读取指定路径图片，返回图片和图片名称'
+    DESCRIPTION = 'Read image from path'
 
     def execute(self, image_path):
         # 去掉可能存在的双引号
@@ -80,7 +80,7 @@ class LoadImagesFromFolder:
     )
     FUNCTION = 'make_list'
     CATEGORY = _CATEGORY
-    DESCRIPTION = '读取文件夹中的图片，返回图片列表和图片批次'
+    DESCRIPTION = 'read images from folder and return image batch and file names'
 
     def make_list(self, start_index, max_index, input_path, step):
         # 判断是否为绝对路径
@@ -156,7 +156,7 @@ class KY_SaveImageToPath:
     def INPUT_TYPES(s):
         return {"required":
                     {"images": ("IMAGE",),
-                     "img_template": ("STRING", {"default": "output/IMG-xx-######.png"}),
+                     "img_template": ("STRING", {"default": "IMG-xx-######.png"}),
                      "start_index": ("INT", {"default": 1, "min": 0, "max": 999999}),
                      "quality": ("INT", {"default": 100, "min": 1, "max": 100}),
                      "extension": (["png", "webp", "jpg"],)},
@@ -172,8 +172,12 @@ class KY_SaveImageToPath:
     FUNCTION = "save_image_to_path"
     OUTPUT_NODE = True
     CATEGORY = _CATEGORY
+    DESCRIPTION = """save images to path, accept image batch and file template
+    Default template: IMG-xx-######.png will save to output/IMG-xx-######.png
+    ##### will be replaced by start_index auto-increment
+    """
 
-    def save_image_to_path(self, images, img_template="output/IMG-xx-######.png", 
+    def save_image_to_path(self, images, img_template="IMG-xx-######.png", 
                           start_index=1, quality=100, extension="png",
                           lossless_webp=True, optimize=False, overwrite=True,
                           prompt=None, extra_pnginfo=None):
