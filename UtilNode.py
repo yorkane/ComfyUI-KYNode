@@ -50,7 +50,7 @@ class KY_JoinToString:
         "STRING",
         "STRING",
     )
-    RETURN_NAMES = ("all-text", "any1-text", "any2-text")
+    RETURN_NAMES = ("prefix+all-text+suffix", "prefix+any1+gap+suffix", "prefix+any2+gap+suffix")
     FUNCTION = "stringifyAny"
     CATEGORY = _CATEGORY
     DESCRIPTION = """
@@ -99,8 +99,8 @@ Converts any type to a string.
             stringified = stringified + suffix  # Add the suffix
         return (
             stringified,
-            any1text,
-            any2text,
+            prefix + any1text + any1_any2_gap + suffix,
+            prefix + any2text + any2_any3_gap + suffix,
         )
 
 
