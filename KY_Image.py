@@ -158,7 +158,7 @@ class KY_SaveImageToPath:
                     {"images": ("IMAGE",),
                      "img_template": ("STRING", {"default": "IMG-xx-######.png"}),
                      "start_index": ("INT", {"default": 1, "min": 0, "max": 999999}),
-                     "quality": ("INT", {"default": 100, "min": 1, "max": 100}),
+                     "quality": ("INT", {"default": 100, "min": 50, "max": 100}),
                      "extension": (["png", "webp", "jpg"],)},
                 "optional": {
                     "lossless_webp": ("BOOLEAN", {"default": True}),

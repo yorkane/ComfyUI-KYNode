@@ -493,7 +493,7 @@ class KY_AnyByIndex:
             }
         }
     
-    TITLE = "List: Get By Index"
+    TITLE = "Get item from list"
     RETURN_TYPES = (any_typ, )
     INPUT_IS_LIST = True
     FUNCTION = "run"
@@ -557,41 +557,78 @@ class KY_AnyToList:
     def INPUT_TYPES(self):
         return {
             "required": {
-                "ANY": (any_typ, {"forceInput": True}),
+                "any1": (any_typ, {"forceInput": True}),
+            },
+            "optional": {
+                "any2": (any_typ,),
+                "any3": (any_typ,),
             }
         }
     
-    TITLE = "Any To List"
-    RETURN_TYPES = (any_typ, )
-    OUTPUT_IS_LIST = (True,)
+    TITLE = "Anything to List"
+    RETURN_TYPES = (any_typ, "INT")
+    RETURN_NAMES = ("merged_list", "total_items")
+    OUTPUT_IS_LIST = (True, False)
+    INPUT_IS_LIST = True
     FUNCTION = "run"
     CATEGORY = _CATEGORY
     DESCRIPTION = """
-    Convert any type into list
-    - For basic types (int/float/bool/str): wrap in list
-    - For list (str/int/float/bool): keep as is
+    Merge up to 3 inputs into a single list:
+    - For basic types (int/float/bool/str): add as single item
+    - For lists: extend the result list
     - For image batch: convert to list of single images
-    - For tuple: convert to list
+    - For tensor batch: convert to list of single tensors
+    Returns:
+    - merged_list: Combined list of all inputs
+    - total_items: Total number of items in the merged list
     """
 
-    def run(self, ANY):
-        # 如果输入已经是列表，直接返回
-        if isinstance(ANY, list):
-            # 检查是否为基本类型列表
-            if all(isinstance(x, (int, float, bool, str)) for x in ANY):
-                return (ANY,)
-            return (ANY,)
+    def process_input(self, input_value):
+        if input_value is None:
+            return []
+            
+        # 因为INPUT_IS_LIST=True，input_value总是列表
+        result = []
+        for item in input_value:
+            result.extend(self.process_single_input(item))
+        return result
+
+    def process_single_input(self, value):
+        # 如果是列表，直接返回
+        if isinstance(value, list):
+            return value
+            
+        # 如果是元组，转换为列表
+        if isinstance(value, tuple):
+            return list(value)
+            
+        # 处理图像或张量批次
+        if isinstance(value, torch.Tensor):
+            if len(value.shape) == 4:  # 图像批次
+                return [value[i:i+1] for i in range(value.shape[0])]
+            elif len(value.shape) > 1:  # 其他张量批次
+                return [value[i] for i in range(value.shape[0])]
+            else:  # 单个张量
+                return [value]
+                
+        # 处理基本类型
+        if isinstance(value, (int, float, bool, str)):
+            return [value]
+            
+        # 其他类型作为单个元素处理
+        return [value]
+
+    def run(self, any1, any2=None, any3=None):
+        result = []
         
-        # 如果输入是元组，转换为列表
-        if isinstance(ANY, tuple):
-            return (list(ANY),)
+        # 处理所有输入
+        result.extend(self.process_input(any1))
+        result.extend(self.process_input(any2))
+        result.extend(self.process_input(any3))
         
-        # 处理图像批次（tensor）
-        if isinstance(ANY, torch.Tensor) and len(ANY.shape) == 4:
-            return ([ANY[i:i+1] for i in range(ANY.shape[0])],)
         
-        # 处理基本类型和其他情况，包装成列表
-        return ([ANY],)
+        # 因为INPUT_IS_LIST=True，我们需要返回单个元素的列表
+        return ([result], len(result))
 
 UTIL_NODE_CLASS_MAPPINGS = {
     "KY_JoinToString": KY_JoinToString,
