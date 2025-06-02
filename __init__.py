@@ -1,4 +1,3 @@
-from .advanced_lying_sigma_sampler import AdvancedLyingSigmaSamplerNode
 from .KY_Files import FILE_CLASS_MAPPINGS, FILE_NAME_MAPPINGS
 from .LLM import LLM_CLASS_MAPPINGS, LLM_NAME_MAPPINGS
 from .KY_Image import IMG_CLASS_MAPPINGS, IMG_NAME_MAPPINGS
@@ -9,13 +8,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {}
 from .UtilNode import UTIL_NODE_CLASS_MAPPINGS, UTIL_NODE_NAME_MAPPINGS
 
 # 将节点映射到NODE_CLASS_MAPPINGS和NODE_DISPLAY_NAME_MAPPINGS
-NODE_CLASS_MAPPINGS = {
-    "AdvancedLyingSigmaSampler": AdvancedLyingSigmaSamplerNode,
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "AdvancedLyingSigmaSampler": "Advanced Lying Sigma Sampler",
-}
 
 
 NODE_CLASS_MAPPINGS.update(FILE_CLASS_MAPPINGS)
