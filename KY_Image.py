@@ -175,7 +175,7 @@ class KY_SaveImageToPath:
     CATEGORY = _CATEGORY
     DESCRIPTION = """save images to path, accept image batch and file template
     Default template: IMG-xx-######.png will save to output/IMG-xx-######.png
-    ##### will be replaced by start_index auto-increment
+    ##### will be replaced by start_index auto-increment, if not overwrite, it will add suffix (1), (2) etc.
     """
 
     def save_image_to_path(self, images, img_template="IMG-xx-######.png", 
@@ -215,7 +215,13 @@ class KY_SaveImageToPath:
 
             # 检查文件是否存在且不允许覆盖
             if not overwrite and os.path.exists(current_path):
-                raise ValueError(f'File exists could not overwrite: {current_path}')
+                # 自动为文件名添加后缀，例如 (1), (2) 等
+                counter = 1
+                file_name_base, file_ext = os.path.splitext(current_filename)
+                while os.path.exists(current_path):
+                    current_filename = f"{file_name_base}-({counter}){file_ext}"
+                    current_path = os.path.join(full_output_dir, current_filename)
+                    counter += 1
 
             # 转换并保存图片
             img = Image.fromarray((image.cpu().numpy() * 255).astype(np.uint8))
@@ -359,6 +365,6 @@ IMG_CLASS_MAPPINGS = {
 IMG_NAME_MAPPINGS = {
     "KY_ReadImage": "Read Image from Path",
     "KY_LoadImagesFromFolder": "Load Images From Folder",
-    "KY_SaveImageToPath": "Save Image To Path",
+    "KY_SaveImageToPath": "Save Images To Path with sequence number",
     "KY_LoadImageFrom": "Load Image (Path/URL/Base64/Input)"
 }
