@@ -177,7 +177,7 @@ class KY_SaveImageToPath:
     Default template: IMG-xx-######.png will save to output/IMG-xx-######.png
     ##### will be replaced by start_index auto-increment (only if # exists in filename)
     If no # in filename, will use original filename without sequence processing
-    If not overwrite, it will add suffix -(1), -(2) etc.
+    If not overwrite, it will add suffix [####] format (4-digit zero-padded, max 9999)
     """
 
     def save_image_to_path(self, images, img_template="IMG-xx-######.png", 
@@ -223,11 +223,13 @@ class KY_SaveImageToPath:
 
             # 检查文件是否存在且不允许覆盖
             if not overwrite and os.path.exists(current_path):
-                # 自动为文件名添加后缀，例如 (1), (2) 等
+                # 自动为文件名添加后缀，格式为[####]，4位0填充
                 counter = 1
                 file_name_base, file_ext = os.path.splitext(current_filename)
                 while os.path.exists(current_path):
-                    current_filename = f"{file_name_base}-({counter}){file_ext}"
+                    if counter > 9999:
+                        raise ValueError(f'已经存在文件后缀超过最大值9999: {current_path}')
+                    current_filename = f"{file_name_base}-[{str(counter).zfill(4)}]{file_ext}"
                     current_path = os.path.join(full_output_dir, current_filename)
                     counter += 1
 
