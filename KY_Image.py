@@ -175,7 +175,9 @@ class KY_SaveImageToPath:
     CATEGORY = _CATEGORY
     DESCRIPTION = """save images to path, accept image batch and file template
     Default template: IMG-xx-######.png will save to output/IMG-xx-######.png
-    ##### will be replaced by start_index auto-increment, if not overwrite, it will add suffix (1), (2) etc.
+    ##### will be replaced by start_index auto-increment (only if # exists in filename)
+    If no # in filename, will use original filename without sequence processing
+    If not overwrite, it will add suffix -(1), -(2) etc.
     """
 
     def save_image_to_path(self, images, img_template="IMG-xx-######.png", 
@@ -204,13 +206,19 @@ class KY_SaveImageToPath:
         
         # 保存所有图片
         for i, image in enumerate(images):
-            # 生成文件名
-            current_index = start_index + i
-            number_str = str(current_index).zfill(zero_count)
-            
-            # 替换模板中的 # 为实际数字
-            current_name = name.replace('#' * zero_count, number_str)
-            current_filename = f"{current_name}.{extension}"
+            # 只有当文件名中包含#占位符时才进行补零和序列处理
+            if zero_count > 0:
+                # 生成文件名
+                current_index = start_index + i
+                number_str = str(current_index).zfill(zero_count)
+                
+                # 替换模板中的 # 为实际数字
+                current_name = name.replace('#' * zero_count, number_str)
+                current_filename = f"{current_name}.{extension}"
+            else:
+                # 如果没有占位符，直接使用原始文件名
+                current_name = name
+                current_filename = f"{current_name}.{extension}"
             current_path = os.path.join(full_output_dir, current_filename)
 
             # 检查文件是否存在且不允许覆盖
