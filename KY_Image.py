@@ -157,12 +157,12 @@ class KY_SaveImageToPath:
     def INPUT_TYPES(s):
         return {"required":
                     {"images": ("IMAGE",),
-                     "img_template": ("STRING", {"default": "IMG-xx-######.png"}),
+                     "img_template": ("STRING", {"default": "IMG-######.png"}),
                      "start_index": ("INT", {"default": 1, "min": 0, "max": 999999}),
-                     "quality": ("INT", {"default": 100, "min": 50, "max": 100}),
+                     "quality": ("INT", {"default": 95, "min": 50, "max": 100}),
                      "extension": (["png", "webp", "jpg"],)},
                 "optional": {
-                    "lossless_webp": ("BOOLEAN", {"default": True}),
+                    "lossless": ("BOOLEAN", {"default": False}),
                     "optimize": ("BOOLEAN", {"default": False}),
                     "overwrite": ("BOOLEAN", {"default": True}),
                 },
@@ -180,9 +180,9 @@ class KY_SaveImageToPath:
     If not overwrite, it will add suffix [####] format (4-digit zero-padded, max 9999)
     """
 
-    def save_image_to_path(self, images, img_template="IMG-xx-######.png", 
-                          start_index=1, quality=100, extension="png",
-                          lossless_webp=True, optimize=False, overwrite=True,
+    def save_image_to_path(self, images, img_template="IMG-#####.png", 
+                          start_index=1, quality=95, extension="png",
+                          lossless=False, optimize=False, overwrite=True,
                           prompt=None, extra_pnginfo=None):
         saved_paths = []
         
@@ -237,7 +237,7 @@ class KY_SaveImageToPath:
             img = Image.fromarray((image.cpu().numpy() * 255).astype(np.uint8))
             img.save(current_path,
                     quality=quality,
-                    lossless=lossless_webp if extension == "webp" else None,
+                    lossless=lossless if extension == "webp" else None,
                     optimize=optimize)
             
             # 生成相对路径用于返回
