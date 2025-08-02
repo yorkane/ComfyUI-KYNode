@@ -2,3 +2,4 @@ numpy
 pillow
 openai
 torch
+requests

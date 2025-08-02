@@ -3,21 +3,28 @@ import os
 import openai
 import base64
 import numpy as np
+import requests
+import json
 from PIL import Image
 
 _CATEGORY = "KYNode/LLM"
+PROTOCOLS = ["openai", "ollama"]
 MODELS = [
     "gpt-4o",
     "gpt-4o-mini",
     "chatgpt-4o-latest",
     "gpt-4-turbo",
-    "OpenGVLab/InternVL2_5-4B",
-    "OpenGVLab/InternVL2_5-8B",
-    "MiniCPM-V-2_6_awq",
-    "MiniCPM-V-2_6",
-    "Qwen/Qwen2.5-32B-Instruct-AWQ",
-    "Qwen/Qwen2.5-7B-Instruct",
-    "./models/Qwen2.5-Coder-7B-Instruct",
+    "OpenGVLab/InternVL3-8B",
+    "MiniCPM-V-2_6_awq"
+]
+OLLAMA_MODELS = [
+    "aha2025/llama-joycaption-beta-one-hf-llava:Q8_0",
+    "qwen2.5vl:7b",
+    "qwen2.5vl:32b",
+    "XiaomiMiMo/MiMo-VL-7B-RL",
+    "dreamingbumblebee/qwen2.5vl-3b-qlora-ko-1.5k_q4_k_m",
+    "openbmb/minicpm-o2.6",
+    "openbmb/minicpm-v2.6"
 ]
 
 
@@ -27,8 +34,10 @@ class OpenAICaptionImage:
         return {
             "required": {
                 "image_in": ("IMAGE", {}),
+                "protocol": (PROTOCOLS, {"default": "openai"}),
                 "custom_model": ("STRING", {"default": ""}),
                 "model": (MODELS,),
+                "ollama_model": (OLLAMA_MODELS,),
                 "system_prompt": (
                     "STRING",
                     {"multiline": True, "default": "You are a movie scene director"},
@@ -55,8 +64,10 @@ class OpenAICaptionImage:
     def caption(
         self,
         image_in,
+        protocol,
         custom_model,
         model,
+        ollama_model,
         system_prompt,
         caption_prompt,
         max_tokens,
@@ -72,21 +83,38 @@ class OpenAICaptionImage:
         pil_image = Image.fromarray(
             np.clip(255.0 * image_in.cpu().numpy().squeeze(), 0, 255).astype(np.uint8)
         )
-        if not custom_model:
-            custom_model = model
+        
+        # 根据协议选择模型
+        if protocol == "ollama":
+            if not custom_model:
+                custom_model = ollama_model
+            return self._caption_ollama(
+                pil_image, custom_model, system_prompt, caption_prompt, 
+                max_tokens, temperature, base_url
+            )
+        else:  # openai
+            if not custom_model:
+                custom_model = model
+            return self._caption_openai(
+                pil_image, custom_model, system_prompt, caption_prompt,
+                max_tokens, temperature, top_p, frequency_penalty, 
+                presence_penalty, base_url, api_key
+            )
 
+    def _caption_openai(self, pil_image, model, system_prompt, caption_prompt,
+                       max_tokens, temperature, top_p, frequency_penalty,
+                       presence_penalty, base_url, api_key):
         # Convert PIL Image to base64
         buffered = io.BytesIO()
         pil_image.save(buffered, format="PNG")
         img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
         # Set up OpenAI client
-        # api_key = os.getenv("OPENAI_API_KEY")
         client = openai.OpenAI(api_key=api_key, base_url=base_url)
 
         # Make API call to OpenAI
         response = client.chat.completions.create(
-            model=custom_model,
+            model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {
@@ -100,7 +128,7 @@ class OpenAICaptionImage:
                     ],
                 },
             ],
-            timeout=3,
+            timeout=30,
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
@@ -114,6 +142,45 @@ class OpenAICaptionImage:
         caption = response.choices[0].message.content.strip()
         return (caption,)
 
+    def _caption_ollama(self, pil_image, model, system_prompt, caption_prompt,
+                       max_tokens, temperature, base_url):
+        # Convert PIL Image to base64
+        buffered = io.BytesIO()
+        pil_image.save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+        # Prepare Ollama API request
+        url = f"{base_url}/api/chat"
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": caption_prompt,
+                    "images": [img_str]
+                }
+            ],
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens
+            }
+        }
+
+        try:
+            response = requests.post(url, json=payload, timeout=30)
+            response.raise_for_status()
+            result = response.json()
+            
+            if "message" in result and "content" in result["message"]:
+                caption = result["message"]["content"].strip()
+                return (caption,)
+            else:
+                raise ValueError("Invalid response format from Ollama")
+        except Exception as e:
+            raise ValueError(f"Ollama API error: {str(e)}")
+
 
 class OpenAICaptionImages:
     @classmethod
@@ -121,8 +188,10 @@ class OpenAICaptionImages:
         return {
             "required": {
                 "images": ("IMAGE", {}),
+                "protocol": (PROTOCOLS, {"default": "openai"}),
                 "custom_model": ("STRING", {"default": ""}),
                 "model": (MODELS,),
+                "ollama_model": (OLLAMA_MODELS,),
                 "system_prompt": (
                     "STRING",
                     {"multiline": True, "default": "You are a movie scene director"},
@@ -151,8 +220,10 @@ class OpenAICaptionImages:
     def caption_batch(
         self,
         images,
+        protocol,
         custom_model,
         model,
+        ollama_model,
         system_prompt,
         caption_prompt,
         max_tokens,
@@ -163,9 +234,26 @@ class OpenAICaptionImages:
         base_url,
         api_key,
     ):
-        if not custom_model:
-            custom_model = model
+        # 根据协议选择模型
+        if protocol == "ollama":
+            if not custom_model:
+                custom_model = ollama_model
+            return self._caption_batch_ollama(
+                images, custom_model, system_prompt, caption_prompt,
+                max_tokens, temperature, base_url
+            )
+        else:  # openai
+            if not custom_model:
+                custom_model = model
+            return self._caption_batch_openai(
+                images, custom_model, system_prompt, caption_prompt,
+                max_tokens, temperature, top_p, frequency_penalty,
+                presence_penalty, base_url, api_key
+            )
 
+    def _caption_batch_openai(self, images, model, system_prompt, caption_prompt,
+                             max_tokens, temperature, top_p, frequency_penalty,
+                             presence_penalty, base_url, api_key):
         # 设置 OpenAI 客户端
         client = openai.OpenAI(api_key=api_key, base_url=base_url)
         
@@ -206,9 +294,9 @@ class OpenAICaptionImages:
 
                 # 发送请求
                 response = client.chat.completions.create(
-                    model=custom_model,
+                    model=model,
                     messages=messages,
-                    timeout=3,
+                    timeout=30,
                     max_tokens=max_tokens,
                     temperature=temperature,
                     top_p=top_p,
@@ -227,14 +315,72 @@ class OpenAICaptionImages:
                 
         return (captions,)
 
+    def _caption_batch_ollama(self, images, model, system_prompt, caption_prompt,
+                           max_tokens, temperature, base_url):
+        # 处理输入图像
+        if len(images.shape) == 4:  # 批次输入 (B,H,W,C)
+            batch_size = images.shape[0]
+            image_list = [images[i:i+1] for i in range(batch_size)]
+        else:  # 单张图片输入
+            image_list = [images]
+        
+        captions = []
+        for img in image_list:
+            try:
+                # 转换图像格式
+                pil_image = Image.fromarray(
+                    np.clip(255.0 * img.cpu().numpy().squeeze(), 0, 255).astype(np.uint8)
+                )
+                
+                # 转换为 base64
+                buffered = io.BytesIO()
+                pil_image.save(buffered, format="PNG")
+                img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+                # Prepare Ollama API request
+                url = f"{base_url}/api/chat"
+                payload = {
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {
+                            "role": "user",
+                            "content": caption_prompt,
+                            "images": [img_str]
+                        }
+                    ],
+                    "stream": False,
+                    "options": {
+                        "temperature": temperature,
+                        "num_predict": max_tokens
+                    }
+                }
+
+                response = requests.post(url, json=payload, timeout=30)
+                response.raise_for_status()
+                result = response.json()
+                
+                if "message" in result and "content" in result["message"]:
+                    caption = result["message"]["content"].strip()
+                    captions.append(caption)
+                else:
+                    captions.append("Error: Invalid response format from Ollama")
+                    
+            except Exception as e:
+                captions.append(f"Error: {str(e)}")
+                
+        return (captions,)
+
 
 class OpenAIChat:
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
+                "protocol": (PROTOCOLS, {"default": "openai"}),
                 "custom_model": ("STRING", {"default": ""}),
                 "model": (MODELS,),
+                "ollama_model": (OLLAMA_MODELS,),
                 "system_prompt": (
                     "STRING",
                     {
@@ -260,8 +406,10 @@ class OpenAIChat:
 
     def chat(
         self,
+        protocol,
         custom_model,
         model,
+        ollama_model,
         system_prompt,
         chat_prompt,
         max_tokens,
@@ -272,19 +420,36 @@ class OpenAIChat:
         top_p,
         presence_penalty,
     ):
-        if not custom_model:
-            custom_model = model
+        # 根据协议选择模型
+        if protocol == "ollama":
+            if not custom_model:
+                custom_model = ollama_model
+            return self._chat_ollama(
+                custom_model, system_prompt, chat_prompt,
+                max_tokens, temperature, base_url
+            )
+        else:  # openai
+            if not custom_model:
+                custom_model = model
+            return self._chat_openai(
+                custom_model, system_prompt, chat_prompt,
+                max_tokens, temperature, top_p, frequency_penalty,
+                presence_penalty, base_url, api_key
+            )
 
+    def _chat_openai(self, model, system_prompt, chat_prompt,
+                    max_tokens, temperature, top_p, frequency_penalty,
+                    presence_penalty, base_url, api_key):
         client = openai.OpenAI(api_key=api_key, base_url=base_url)
 
         # Make API call to OpenAI
         response = client.chat.completions.create(
-            model=custom_model,
+            model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": chat_prompt},
             ],
-            timeout=3,
+            timeout=30,
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
@@ -297,6 +462,36 @@ class OpenAIChat:
         # Extract and return the caption
         result = response.choices[0].message.content.strip()
         return (result,)
+
+    def _chat_ollama(self, model, system_prompt, chat_prompt,
+                    max_tokens, temperature, base_url):
+        # Prepare Ollama API request
+        url = f"{base_url}/api/chat"
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": chat_prompt}
+            ],
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens
+            }
+        }
+
+        try:
+            response = requests.post(url, json=payload, timeout=30)
+            response.raise_for_status()
+            result = response.json()
+            
+            if "message" in result and "content" in result["message"]:
+                result_text = result["message"]["content"].strip()
+                return (result_text,)
+            else:
+                raise ValueError("Invalid response format from Ollama")
+        except Exception as e:
+            raise ValueError(f"Ollama API error: {str(e)}")
 
 
 LLM_CLASS_MAPPINGS = {
