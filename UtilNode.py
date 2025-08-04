@@ -29,6 +29,29 @@ class AnyType(str):
 
 any_typ = AnyType("*")
 
+def safe_get_bbox(lst, index, default=None):
+    if 0 <= index < len(lst):
+        return [[lst[index]]]
+    return default
+
+def is_deep_empty(obj):
+    if obj is None:
+        return True
+    if isinstance(obj, str):
+        return obj.strip() == ''
+    if isinstance(obj, (list, tuple, set)):
+        if len(obj) == 0:
+            return True
+        return all(is_deep_empty(item) for item in obj)
+    if isinstance(obj, dict):
+        return len(obj) == 0 or all(is_deep_empty(v) for v in obj.values())
+    if hasattr(obj, 'numel'):  # PyTorch Tensor
+        return obj.numel() == 0
+    if hasattr(obj, 'size'):   # NumPy Array
+        return obj.size == 0
+    return False  # 非空值（数字、非空字符串、对象等）
+
+
 
 class KY_JoinToString:
     @classmethod
@@ -219,27 +242,26 @@ class KY_RegexExtractor:
             stringified = stringified + ", ".join(str(item) for item in any2)
         stringified = stringified + input_string
         try:
-            match = re.search(regex, stringified)
+            match = re.search(regex, stringified, re.MULTILINE | re.DOTALL)
             if match:
                 groups = match.groups()
                 count = len(groups)
-                if count >= 1:
+                if count >= 2:
+                    return (match.group(group_number), match.group(1), match.group(2))
+                elif count >= 1:
                     return (
                         match.group(group_number),
                         match.group(1),
+                        "",
                     )
-                if count >= 2:
-                    return (match.group(group_number), match.group(1), match.group(2))
-                if 0 <= group_number <= len(groups):
-                    return (match.group(group_number),)
+                elif 0 <= group_number <= len(groups):
+                    return (match.group(group_number), "", "")
                 else:
-                    raise Exception("Regex don't have match group: " + group_number)
-                    return ("",)
+                    return ("", "", "")
             else:
-                raise Exception("Regex don't match: " + stringified)
-                return ("",)
+                return ("", "", "")
         except re.error:
-            return ("无效的正则表达式",)
+            return ("无效的正则表达式", "", "")
 
 
 operators = {
@@ -630,6 +652,68 @@ class KY_AnyToList:
         # 因为INPUT_IS_LIST=True，我们需要返回单个元素的列表
         return ([result], len(result))
 
+class BBoxesToSAM2:
+    """Convert a list of bounding boxes to the format expected by SAM2 nodes."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        
+        return {
+            "optional": {
+                "jsonBbox": ("JSON", {"default": ""}),
+                "bboxes": ("BBOX", {"default": [[[]]]})
+            }
+        }
+
+    RETURN_TYPES = ("BBOXES","BBOXES","BBOXES","BBOXES", )
+    RETURN_NAMES = ("All sam2_bboxes","sam2_bboxe1","sam2_bboxe2","sam2_bboxe3", )
+    FUNCTION = "convert"
+    CATEGORY = _CATEGORY
+
+    def convert(self, jsonBbox, bboxes=[[[0,0,0,0]]]):
+        if jsonBbox == "":
+            box_2d = bboxes
+        else:
+            box_2d = json.loads(jsonBbox)
+        if not isinstance(box_2d, list):
+            raise ValueError("bboxes must be a list")
+        bboxes = [b["bbox_2d"] for b in box_2d]
+
+        # If already batched, return as-is
+        if bboxes and isinstance(bboxes[0], (list, tuple)) and bboxes[0] and isinstance(bboxes[0][0], (list, tuple)):
+            return (bboxes, [safe_get_bbox(bboxes,0, [])], [safe_get_bbox(bboxes,1, [])], [safe_get_bbox(bboxes,2, [])] )
+
+        return ([bboxes], safe_get_bbox(bboxes,0, None), safe_get_bbox(bboxes,1, None), safe_get_bbox(bboxes,2, None) )
+
+class KY_isNone_blocker:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "any": (any_typ,)
+            },
+            "optional": {
+                "reverse": ("BOOLEAN", {"default": False}),
+                "block_execution": ("BOOLEAN", {"default": True}),
+            }
+        }
+    RETURN_TYPES = (any_typ, "BOOLEAN")
+    RETURN_NAMES = ("out", "boolean",)
+    FUNCTION = "execute"
+    CATEGORY = _CATEGORY
+
+    def execute(self, any, reverse, block_execution):
+        bol = is_deep_empty(any)
+        from comfy_execution.graph import ExecutionBlocker
+        # return (kwargs['in'] if kwargs['continue'] else ExecutionBlocker(None),)
+        if block_execution and bol and not reverse:
+            return (ExecutionBlocker(None),)
+        if reverse:
+            return (any, not bol,)
+        else:
+            return (any, bol,)
+
+
 UTIL_NODE_CLASS_MAPPINGS = {
     "KY_JoinToString": KY_JoinToString,
     "KY_RegexReplace": KY_RegexReplace,
@@ -637,6 +721,10 @@ UTIL_NODE_CLASS_MAPPINGS = {
     "KY_MathExpression": KY_MathExpression,
     "KY_AnyByIndex": KY_AnyByIndex,
     "KY_AnyToList": KY_AnyToList,
+    "KY_BBoxesToSAM2": BBoxesToSAM2,
+    "KY_isNone": KY_isNone_blocker,
+    
+    
 }
 
 UTIL_NODE_NAME_MAPPINGS = {
@@ -646,4 +734,6 @@ UTIL_NODE_NAME_MAPPINGS = {
     "KY_MathExpression": "Math expression eval",
     "KY_AnyByIndex": "Anything Get By Index",
     "KY_AnyToList": "Anything To List",
+    "KY_BBoxesToSAM2": "Prepare BBoxes for SAM2",
+    "KY_isNone": "Block if None or empty ",
 }

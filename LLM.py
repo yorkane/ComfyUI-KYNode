@@ -22,7 +22,6 @@ OLLAMA_MODELS = [
     "qwen2.5vl:7b",
     "qwen2.5vl:32b",
     "XiaomiMiMo/MiMo-VL-7B-RL",
-    "dreamingbumblebee/qwen2.5vl-3b-qlora-ko-1.5k_q4_k_m",
     "openbmb/minicpm-o2.6",
     "openbmb/minicpm-v2.6"
 ]
