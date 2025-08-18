@@ -165,6 +165,7 @@ class KY_SaveImageToPath:
                     "lossless": ("BOOLEAN", {"default": False}),
                     "optimize": ("BOOLEAN", {"default": False}),
                     "overwrite": ("BOOLEAN", {"default": True}),
+                    "NOTSAVE": ("BOOLEAN", {"default": False}),
                 },
                 "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"}
                 }
@@ -180,10 +181,12 @@ class KY_SaveImageToPath:
     If not overwrite, it will add suffix [####] format (4-digit zero-padded, max 9999)
     """
 
-    def save_image_to_path(self, images, img_template="IMG-#####.png", 
+    def save_image_to_path(self, images, img_template="IMG-####.png", 
                           start_index=1, quality=95, extension="png",
-                          lossless=False, optimize=False, overwrite=True,
+                          lossless=False, optimize=False, overwrite=True, NOTSAVE=False,
                           prompt=None, extra_pnginfo=None):
+        if NOTSAVE:
+            return images
         saved_paths = []
         
         # 分离目录和文件名模板

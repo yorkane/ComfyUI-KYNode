@@ -30,6 +30,26 @@ class AnyType(str):
 any_typ = AnyType("*")
 
 
+def is_deep_empty(obj):
+    if obj is None:
+        return True
+    if isinstance(obj, str):
+        return obj.strip() == ''
+    if isinstance(obj, torch.Tensor) and torch.all(obj == 0): # 判断是否为空 image 或者 mask
+        print('判断是否为空 image 或者 mask sinstance(obj, torch.Tensor) and torch.all(obj == 0)')
+        return True 
+    if isinstance(obj, (list, tuple, set)):
+        if len(obj) == 0:
+            return True
+        return all(is_deep_empty(item) for item in obj)
+    if isinstance(obj, dict):
+        return len(obj) == 0 or all(is_deep_empty(v) for v in obj.values())
+    if hasattr(obj, 'numel'):  # PyTorch Tensor
+        return obj.numel() == 0
+    if hasattr(obj, 'size'):   # NumPy Array
+        return obj.size == 0
+    return False  # 非空值（数字、非空字符串、对象等）
+
 class KY_JoinToString:
     @classmethod
     def INPUT_TYPES(s):
@@ -219,27 +239,26 @@ class KY_RegexExtractor:
             stringified = stringified + ", ".join(str(item) for item in any2)
         stringified = stringified + input_string
         try:
-            match = re.search(regex, stringified)
+            match = re.search(regex, stringified, re.MULTILINE | re.DOTALL)
             if match:
                 groups = match.groups()
                 count = len(groups)
-                if count >= 1:
+                if count >= 2:
+                    return (match.group(group_number), match.group(1), match.group(2))
+                elif count >= 1:
                     return (
                         match.group(group_number),
                         match.group(1),
+                        "",
                     )
-                if count >= 2:
-                    return (match.group(group_number), match.group(1), match.group(2))
-                if 0 <= group_number <= len(groups):
-                    return (match.group(group_number),)
+                elif 0 <= group_number <= len(groups):
+                    return (match.group(group_number), "", "")
                 else:
-                    raise Exception("Regex don't have match group: " + group_number)
-                    return ("",)
+                    return ("", "", "")
             else:
-                raise Exception("Regex don't match: " + stringified)
-                return ("",)
+                return ("", "", "")
         except re.error:
-            return ("无效的正则表达式",)
+            return ("无效的正则表达式", "", "")
 
 
 operators = {
@@ -630,6 +649,84 @@ class KY_AnyToList:
         # 因为INPUT_IS_LIST=True，我们需要返回单个元素的列表
         return ([result], len(result))
 
+class KY_isNone_blocker:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "any": (any_typ,)
+            },
+            "optional": {
+                "reverse": ("BOOLEAN", {"default": False}),
+                "block_execution": ("BOOLEAN", {"default": True}),
+            }
+        }
+    RETURN_TYPES = (any_typ, "BOOLEAN")
+    RETURN_NAMES = ("out", "boolean",)
+    FUNCTION = "execute"
+    CATEGORY = _CATEGORY
+
+    def execute(self, any, reverse, block_execution):
+        bol = is_deep_empty(any)
+        from comfy_execution.graph import ExecutionBlocker
+        # return (kwargs['in'] if kwargs['continue'] else ExecutionBlocker(None),)
+        if block_execution and bol and not reverse:
+            return (ExecutionBlocker(None), bol)
+        if reverse:
+            return (any, not bol,)
+        else:
+            return (any, bol,)
+
+class KY_MergeToJSON:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "json_input_1": ("STRING", {"multiline": True}),
+                "json_input_2": ("STRING", {"multiline": True}),
+                "merge_strategy": (["override", "preserve", "concat"], {"default": "override"}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("merged_json",)
+    FUNCTION = "merge_json"
+    CATEGORY = _CATEGORY
+
+    def merge_json(self, json_input_1: str, json_input_2: str, merge_strategy: str) -> tuple[str]:
+        try:
+            data1 = json.loads(json_input_1)
+            data2 = json.loads(json_input_2)
+            
+            if isinstance(data1, list) and isinstance(data2, list):
+                result = data1 + data2
+            elif isinstance(data1, dict) and isinstance(data2, dict):
+                result = self._merge_dicts(data1, data2, merge_strategy)
+            else:
+                raise ValueError("Both inputs must be of the same type (either objects or arrays)")
+                
+            return (json.dumps(result, indent=2),)
+        except json.JSONDecodeError:
+            raise ValueError("Invalid JSON input")
+
+    def _merge_dicts(self, dict1: dict, dict2: dict, strategy: str) -> dict:
+        result = dict1.copy()
+        
+        for key, value in dict2.items():
+            if key not in result:
+                result[key] = value
+            else:
+                if strategy == "override":
+                    result[key] = value
+                elif strategy == "preserve":
+                    continue
+                elif isinstance(result[key], dict) and isinstance(value, dict):
+                    result[key] = self._merge_dicts(result[key], value, strategy)
+                elif isinstance(result[key], list) and isinstance(value, list):
+                    result[key] = result[key] + value
+                    
+        return result 
+
 UTIL_NODE_CLASS_MAPPINGS = {
     "KY_JoinToString": KY_JoinToString,
     "KY_RegexReplace": KY_RegexReplace,
@@ -637,6 +734,8 @@ UTIL_NODE_CLASS_MAPPINGS = {
     "KY_MathExpression": KY_MathExpression,
     "KY_AnyByIndex": KY_AnyByIndex,
     "KY_AnyToList": KY_AnyToList,
+    "KY_isNone": KY_isNone_blocker,
+    "KY_MergeToJSON":  KY_MergeToJSON,
 }
 
 UTIL_NODE_NAME_MAPPINGS = {
@@ -646,4 +745,6 @@ UTIL_NODE_NAME_MAPPINGS = {
     "KY_MathExpression": "Math expression eval",
     "KY_AnyByIndex": "Anything Get By Index",
     "KY_AnyToList": "Anything To List",
+    "KY_isNone": "Block if None or empty ",
+    "KY_MergeToJSON":  "Merge ",
 }
