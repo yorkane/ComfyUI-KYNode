@@ -29,6 +29,29 @@ class AnyType(str):
 
 any_typ = AnyType("*")
 
+def safe_get_bbox(lst, index, default=None):
+    if 0 <= index < len(lst):
+        return [[lst[index]]]
+    return default
+
+def is_deep_empty(obj):
+    if obj is None:
+        return True
+    if isinstance(obj, str):
+        return obj.strip() == ''
+    if isinstance(obj, (list, tuple, set)):
+        if len(obj) == 0:
+            return True
+        return all(is_deep_empty(item) for item in obj)
+    if isinstance(obj, dict):
+        return len(obj) == 0 or all(is_deep_empty(v) for v in obj.values())
+    if hasattr(obj, 'numel'):  # PyTorch Tensor
+        return obj.numel() == 0
+    if hasattr(obj, 'size'):   # NumPy Array
+        return obj.size == 0
+    return False  # 非空值（数字、非空字符串、对象等）
+
+
 
 def is_deep_empty(obj):
     if obj is None:
