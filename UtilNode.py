@@ -11,7 +11,8 @@ import ast
 import operator as op
 import torch
 import logging
-
+from comfy_execution.graph import ExecutionBlocker
+        
 _CATEGORY = "KYNode/Utils"
 
 
@@ -39,25 +40,6 @@ def is_deep_empty(obj):
         return True
     if isinstance(obj, str):
         return obj.strip() == ''
-    if isinstance(obj, (list, tuple, set)):
-        if len(obj) == 0:
-            return True
-        return all(is_deep_empty(item) for item in obj)
-    if isinstance(obj, dict):
-        return len(obj) == 0 or all(is_deep_empty(v) for v in obj.values())
-    if hasattr(obj, 'numel'):  # PyTorch Tensor
-        return obj.numel() == 0
-    if hasattr(obj, 'size'):   # NumPy Array
-        return obj.size == 0
-    return False  # 非空值（数字、非空字符串、对象等）
-
-
-
-def is_deep_empty(obj):
-    if obj is None:
-        return True
-    if isinstance(obj, str):
-        return obj.strip() == ''
     if isinstance(obj, torch.Tensor) and torch.all(obj == 0): # 判断是否为空 image 或者 mask
         print('判断是否为空 image 或者 mask sinstance(obj, torch.Tensor) and torch.all(obj == 0)')
         return True 
@@ -71,6 +53,8 @@ def is_deep_empty(obj):
         return obj.numel() == 0
     if hasattr(obj, 'size'):   # NumPy Array
         return obj.size == 0
+    if isinstance(obj, (int, float, complex)):
+        return obj == 0
     return False  # 非空值（数字、非空字符串、对象等）
 
 class KY_JoinToString:
@@ -681,24 +665,74 @@ class KY_isNone_blocker:
             },
             "optional": {
                 "reverse": ("BOOLEAN", {"default": False}),
-                "block_execution": ("BOOLEAN", {"default": True}),
+                "block_execution": ("BOOLEAN", {"default": False}),
             }
         }
     RETURN_TYPES = (any_typ, "BOOLEAN")
-    RETURN_NAMES = ("out", "boolean",)
+    RETURN_NAMES = ("out", "is_empty",)
     FUNCTION = "execute"
     CATEGORY = _CATEGORY
 
     def execute(self, any, reverse, block_execution):
-        bol = is_deep_empty(any)
-        from comfy_execution.graph import ExecutionBlocker
-        # return (kwargs['in'] if kwargs['continue'] else ExecutionBlocker(None),)
-        if block_execution and bol and not reverse:
-            return (ExecutionBlocker(None), bol)
+        is_empty = is_deep_empty(any)
+        if block_execution and is_empty and not reverse:
+            return (ExecutionBlocker(None), is_empty)
         if reverse:
-            return (any, not bol,)
+            return (any, not is_empty,)
         else:
-            return (any, bol,)
+            return (any, is_empty,)
+
+class KY_First_NOT_EMPTY:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "Fallback": (any_typ,)
+            },
+            "optional": {
+                "A": (any_typ,),
+                "B": (any_typ,),
+                "C": (any_typ,),
+                "D": (any_typ,),
+                "force_fallback": ("BOOLEAN", {"default": True}),
+                "block_if_all_empty": ("BOOLEAN", {"default": True}),
+            }
+        }
+    RETURN_TYPES = (any_typ, "BOOLEAN")
+    RETURN_NAMES = ("out", "is_blocked",)
+    FUNCTION = "execute"
+    CATEGORY = _CATEGORY
+    DESCRIPTION = """
+    Return first not NONE value/Image/Mask :
+    - Empty list, Dictionary, Turple
+    - Empty String
+    - 0 float int complex
+    - empty tensor
+    """
+
+    def execute(self, A = None, B = None, C = None, D = None, Fallback = None, force_fallback = False, block_if_all_empty = False):
+        if force_fallback:
+            if is_deep_empty(Fallback) and block_if_all_empty:
+                return (ExecutionBlocker(None), True)
+            return (Fallback, False)
+        val = None
+        if not is_deep_empty(A):
+            val = A
+        elif not is_deep_empty(B):
+            val = B
+        elif not is_deep_empty(C):
+            val = C
+        elif not is_deep_empty(D):
+            val = D
+        else:
+            val = Fallback
+        bol = is_deep_empty(val)
+
+        # return (kwargs['in'] if kwargs['continue'] else ExecutionBlocker(None),)
+        if block_if_all_empty and bol:
+            return (ExecutionBlocker(None), True)
+        else:
+            return (val, False,)
 
 class KY_MergeToJSON:
     @classmethod
@@ -748,7 +782,8 @@ class KY_MergeToJSON:
                 elif isinstance(result[key], list) and isinstance(value, list):
                     result[key] = result[key] + value
                     
-        return result 
+        return result
+
 
 UTIL_NODE_CLASS_MAPPINGS = {
     "KY_JoinToString": KY_JoinToString,
@@ -759,6 +794,7 @@ UTIL_NODE_CLASS_MAPPINGS = {
     "KY_AnyToList": KY_AnyToList,
     "KY_isNone": KY_isNone_blocker,
     "KY_MergeToJSON":  KY_MergeToJSON,
+    "KY_First_NOT_EMPTY": KY_First_NOT_EMPTY,
 }
 
 UTIL_NODE_NAME_MAPPINGS = {
@@ -769,5 +805,6 @@ UTIL_NODE_NAME_MAPPINGS = {
     "KY_AnyByIndex": "Anything Get By Index",
     "KY_AnyToList": "Anything To List",
     "KY_isNone": "Block if None or empty ",
-    "KY_MergeToJSON":  "Merge ",
+    "KY_MergeToJSON":  "Merge Json",
+    "KY_First_NOT_EMPTY": "First NOT NONE",
 }
