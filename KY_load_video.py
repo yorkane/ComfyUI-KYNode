@@ -273,7 +273,7 @@ def load_video(memory_limit_mb=None,
         "loaded_width": new_width,
         "loaded_height": new_height,
     }
-    return (images, len(images), audio, fps, video_info)
+    return (images, len(images), audio, fps, len(images), video_info)
 
 class LoadVideoByPath:
     @classmethod
@@ -297,8 +297,8 @@ class LoadVideoByPath:
 
     CATEGORY = "KY_Video"
 
-    RETURN_TYPES = (imageOrLatent, "MASK", "AUDIO", "VHS_VIDEOINFO", "FLOAT", "STRING")
-    RETURN_NAMES = ("IMAGE", "mask", "audio", "video_info", "fps", "video_path_url")
+    RETURN_TYPES = (imageOrLatent, "MASK", "AUDIO", "VHS_VIDEOINFO", "STRING", "FLOAT", "INT")
+    RETURN_NAMES = ("IMAGE", "mask", "audio", "video_info", "video_path_url", "fps", "frame_count")
 
     FUNCTION = "load_video"
 
@@ -323,15 +323,16 @@ class LoadVideoByPath:
         pix_fmt = kwargs.pop('pix_fmt', "rgba64le")
         
         
-        image, _, audio, fps, video_info =  load_video(
+        image, _, audio, fps, frame_count, video_info =  load_video(
             **kwargs, 
             generator=ffmpeg_frame_generator,
             custom_colorspace=custom_colorspace,
             pix_fmt=pix_fmt
         )
+        
         if image.size(3) == 4:
             return (image[:,:,:,:3], 1-image[:,:,:,3], audio, video_info)
-        return (image, torch.zeros(image.size(0), 64, 64, device="cpu"), audio, fps, video_info, video_path)
+        return (image, torch.zeros(image.size(0), 64, 64, device="cpu"), audio, video_info, video_path, fps, frame_count)
 
     @classmethod
     def IS_CHANGED(s, video, **kwargs):
