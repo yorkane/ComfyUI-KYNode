@@ -99,26 +99,19 @@ class VideoCompareNode:
     @classmethod
     def INPUT_TYPES(cls):
         return {
-            "required": {
-                "mode": (["url", "video_file"], {
-                    "default": "url"
-                }),
-            },
             "optional": {
-                "video_a_url": ("STRING", {
-                    "default": "https://sample-videos.com/zip/500kb/sample-video-30s.mp4",
+                "video_a_url_or_filepath": ("STRING", {
+                    "placeholder": "https://s3-us-west-2.amazonaws.com/s.cdpn.io/4273/floodplain-dirty.mp4",
+                    "default": "",
                     "multiline": False
                 }),
-                "video_b_url": ("STRING", {
-                    "default": "https://s3-us-west-2.amazonaws.com/s.cdpn.io/4273/floodplain-dirty.mp4?2222",
+                "video_b_url_or_filepath": ("STRING", {
+                    "placeholder": "https://s3-us-west-2.amazonaws.com/s.cdpn.io/4273/floodplain-dirty.mp4",
+                    "default": "",
                     "multiline": False
                 }),
                 "video_a": ("VIDEO",),
                 "video_b": ("VIDEO",),
-            },
-            "hidden": {
-                "unique_id": "UNIQUE_ID",
-                "extra_pnginfo": "EXTRA_PNGINFO"
             }
         }
 
@@ -128,14 +121,13 @@ class VideoCompareNode:
     DESCRIPTION = "对比两个视频（支持URL和视频文件）并在预览窗口中显示"
     OUTPUT_NODE = True
 
-    def compare_videos(self, mode, video_a_url=None, video_b_url=None, video_a=None, video_b=None, unique_id=None, extra_pnginfo=None):
+    def compare_videos(self, video_a_url_or_filepath="", video_b_url_or_filepath="", video_a=None, video_b=None):
         """
         对比两个视频（支持URL和视频文件）
         
         Args:
-            mode: 对比模式 ("url" 或 "video_file")
-            video_a_url: 第一个视频URL
-            video_b_url: 第二个视频URL
+            video_a_url: 第一个视频URL或文件地址
+            video_b_url: 第二个视频URL或文件地址
             video_a: 第一个视频文件对象
             video_b: 第二个视频文件对象
             
@@ -145,18 +137,22 @@ class VideoCompareNode:
         video_a_source = ""
         video_b_source = ""
         
-        if mode == "url":
-            video_a_source = video_a_url if video_a_url else ""
-            video_b_source = video_b_url if video_b_url else ""
-        elif mode == "video_file":
-            
-            # 强制处理，即使对象为None也尝试处理
-            video_a_source = process_video_object(video_a) if video_a is not None else (video_a_url or "")
-            print(f"Video A source: {video_a_source}")
-            
-            video_b_source = process_video_object(video_b) if video_b is not None else (video_b_url or "")
-            print(f"Video B source: {video_b_source}")
+        if video_a is not None:
+            video_a_source = process_video_object(video_a) if video_a is not None else (video_a_url_or_filepath or "")
+        if video_b is not None:
+            video_b_source = process_video_object(video_b) if video_b is not None else (video_b_url_or_filepath or "")
         
+        # if video_a_url is empty
+        
+    
+    
+        if video_a_url_or_filepath is not None and not video_a_url_or_filepath.startswith("http"):
+            video_a_url_or_filepath = process_video_object(video_a_url_or_filepath)
+        if video_b_url_or_filepath is not None and not video_b_url_or_filepath.startswith("http"):
+            video_b_url_or_filepath = process_video_object(video_b_url_or_filepath)
+        video_a_source = video_a_url_or_filepath if video_a_url_or_filepath else video_a_source
+        video_b_source = video_b_url_or_filepath if video_b_url_or_filepath else video_b_source
+ 
         # 确保返回的是字符串而不是数组
         if isinstance(video_a_source, list):
             video_a_source = ''.join(video_a_source)
@@ -168,8 +164,7 @@ class VideoCompareNode:
         result = {
             "ui": {
                 "video_a_source": video_a_source,
-                "video_b_source": video_b_source,
-                "mode": mode
+                "video_b_source": video_b_source
             },
             "result": ()
         }

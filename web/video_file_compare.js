@@ -30,13 +30,8 @@ app.registerExtension({
                         videoBUrl = this.widgets.find(w => w.name === "video_b_url")?.value || "";
                     }
                     
-                    console.log("Opening video compare window from widget click");
-                    console.log("Mode:", mode);
-                    console.log("Video A URL:", videoAUrl);
-                    console.log("Video B URL:", videoBUrl);
-                    
                     // 打开新的窗口显示视频对比
-                    openVideoCompareWindow(videoAUrl, videoBUrl, mode);
+                    openVideoCompareWindow(videoAUrl, videoBUrl);
                 });
                 
                 return r;
@@ -68,12 +63,11 @@ app.registerExtension({
                     console.log("Extracted data from message:");
                     console.log("Video A URL:", videoAUrl);
                     console.log("Video B URL:", videoBUrl);
-                    console.log("Mode:", mode);
                     
                     // 只有当至少有一个视频URL不为空时才打开窗口
                     if (videoAUrl || videoBUrl) {
                         console.log("Opening video compare window from onExecuted");
-                        openVideoCompareWindow(videoAUrl, videoBUrl, mode);
+                        openVideoCompareWindow(videoAUrl, videoBUrl);
                     } else {
                         console.log("Both video URLs are empty, not opening window");
                     }
@@ -86,12 +80,7 @@ app.registerExtension({
 });
 
 // 打开视频对比窗口的函数
-function openVideoCompareWindow(videoAUrl, videoBUrl, mode) {
-    console.log("openVideoCompareWindow called");
-    console.log("Video A URL:", videoAUrl);
-    console.log("Video B URL:", videoBUrl);
-    console.log("Mode:", mode);
-    
+function openVideoCompareWindow(videoAUrl, videoBUrl) {    
     // 处理undefined或null值并确保是字符串
     videoAUrl = (videoAUrl || "").toString();
     videoBUrl = (videoBUrl || "").toString();
@@ -112,7 +101,7 @@ function openVideoCompareWindow(videoAUrl, videoBUrl, mode) {
 <style>
 body {
   background: #333;
-  margin: 5px;
+  margin: 4px;
 }
 #video-compare-container {
   display: inline-block;
@@ -145,11 +134,40 @@ body {
     color: #ccc;
     float: left;
 }
+.controls {
+  margin: 5px 0;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.controls button {
+  padding: 5px;
+  background: #444;
+  color: white;
+  border: 1px solid #666;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.controls button:hover {
+  background: #555;
+}
+.controls input {
+  padding: 4px;
+  flex: 1;
+  max-width: 49%;
+}
 </style>
   
 </head>
 
 <body translate="no">
+  <div class="controls">
+    <button id="reload-btn">Reload</button>
+    <input type="text" id="videoA-url" placeholder="Video A URL" value="https://s3-us-west-2.amazonaws.com/s.cdpn.io/4273/floodplain-dirty.mp4">
+    <input type="text" id="videoB-url" placeholder="Video B URL" value="https://s3-us-west-2.amazonaws.com/s.cdpn.io/4273/floodplain-clean.mp4">
+  </div>
+  
   <div id="video-compare-container">
   <video loop="" autoplay="" muted="">
     <source src="${videoAUrl}">
@@ -160,7 +178,6 @@ body {
     </video>
   </div>
 	</div>
-  <span id="title1">VideoA</span><span id="title2">VideoB</span>
       <script id="rendered-js">
 function trackLocation(e) {
   var rect = videoContainer.getBoundingClientRect(),
@@ -171,6 +188,22 @@ function trackLocation(e) {
     clippedVideo.style.zIndex = 3;
   }
 }
+
+function reloadVideos() {
+  var videoAUrl = document.getElementById('videoA-url').value;
+  var videoBUrl = document.getElementById('videoB-url').value;
+  
+  var videoContainer = document.getElementById("video-compare-container");
+  var videoA = videoContainer.getElementsByTagName("video")[0];
+  var videoB = clippedVideo;
+  
+  videoA.getElementsByTagName('source')[0].src = videoAUrl;
+  videoB.getElementsByTagName('source')[0].src = videoBUrl;
+  
+  videoA.load();
+  videoB.load();
+}
+
 var videoContainer = document.getElementById("video-compare-container"),
 videoClipper = document.getElementById("video-clipper"),
 clippedVideo = videoClipper.getElementsByTagName("video")[0];
@@ -179,6 +212,8 @@ videoContainer.addEventListener("touchstart", trackLocation, false);
 videoContainer.addEventListener("touchmove", trackLocation, false);
 var videoA = videoContainer.getElementsByTagName("video")[0];
 var videoB = clippedVideo
+
+document.getElementById('reload-btn').addEventListener('click', reloadVideos);
         // 视频加载完成后同步播放
         videoA.addEventListener('loadeddata', function() {
             if (videoB.readyState >= 3) {
@@ -186,14 +221,12 @@ var videoB = clippedVideo
                 videoB.play();
             }
         });
-        
         videoB.addEventListener('loadeddata', function() {
             if (videoA.readyState >= 3) {
                 videoA.play();
                 videoB.play();
             }
         });
-        
         // 处理视频播放同步
         function syncVideos() {
             if (videoA.paused && videoB.paused) return;
@@ -204,11 +237,8 @@ var videoB = clippedVideo
                 videoB.currentTime = videoA.currentTime;
             }
         }
-        
         // 定期同步视频
         setInterval(syncVideos, 100);
-        document.getElementById("title1").innerHTML = videoA.getElementsByTagName('source')[0].src
-        document.getElementById("title2").innerHTML = videoB.getElementsByTagName('source')[0].src
 </script></body></html>
     `;
     
@@ -216,6 +246,4 @@ var videoB = clippedVideo
     const newWindow = window.open("", "_blank");
     newWindow.document.write(htmlContent);
     newWindow.document.close();
-    
-    console.log("Video compare window opened");
 }
