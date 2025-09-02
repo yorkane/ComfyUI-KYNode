@@ -60,7 +60,64 @@ def is_deep_empty(obj):
         return obj.size == 0
     return False  # 非空值（数字、非空字符串、对象等）
 
+class BBoxPosition:
+    """Determine which quadrant of an image a bounding box falls into"""
+    
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "x": ("INT", {"default": 0, "min": 0, "max": 10000}),
+                "y": ("INT", {"default": 0, "min": 0, "max": 10000}),
+                "width": ("INT", {"default": 100, "min": 1, "max": 10000}),
+                "height": ("INT", {"default": 100, "min": 1, "max": 10000}),
+                "image_width": ("INT", {"default": 1920, "min": 1, "max": 10000}),
+                "image_height": ("INT", {"default": 1080, "min": 1, "max": 10000}),
+            }
+        }
 
+    RETURN_TYPES = ("STRING", "STRING", "BBOX", "INT", "INT", "INT", "INT")
+    RETURN_NAMES = ("position", "description", "bbox", "x", "y", "width", "height")
+    FUNCTION = "get_position"
+    CATEGORY = _CATEGORY
+
+    def get_position(self, x, y, width, height, image_width, image_height):
+        # Calculate the center point of the bounding box
+        center_x = x + width / 2
+        center_y = y + height / 2
+        
+        # Determine the quadrant based on the center point
+        if center_x <= image_width / 2 and center_y <= image_height / 2:
+            position = "top-left"
+            description = "左上"
+        elif center_x > image_width / 2 and center_y <= image_height / 2:
+            position = "top-right"
+            description = "右上"
+        elif center_x <= image_width / 2 and center_y > image_height / 2:
+            position = "bottom-left"
+            description = "左下"
+        else:  # center_x > image_width / 2 and center_y > image_height / 2
+            position = "bottom-right"
+            description = "右下"
+            
+        # Create a 512x512 bbox based on the quadrant
+        bbox_size = 512
+        if position == "top-left":
+            bbox_x, bbox_y = 0, 0
+        elif position == "top-right":
+            bbox_x, bbox_y = image_width - bbox_size, 0
+        elif position == "bottom-left":
+            bbox_x, bbox_y = 0, image_height - bbox_size
+        else:  # bottom-right
+            bbox_x, bbox_y = image_width - bbox_size, image_height - bbox_size
+            
+        # Ensure bbox is within image bounds
+        bbox_x = max(0, min(bbox_x, image_width - bbox_size))
+        bbox_y = max(0, min(bbox_y, image_height - bbox_size))
+        
+        bbox = [bbox_x, bbox_y, bbox_size, bbox_size]
+        
+        return (position, description, bbox, bbox_x, bbox_y, bbox_size, bbox_size)
 
 
 class JSONToBBox:
@@ -132,7 +189,7 @@ class BBoxesToSAM2:
 
 
 
-class toBBox:
+class XYWHtoBBox:
     """Convert x,y,width, height into bbox"""
     @classmethod
     def INPUT_TYPES(cls):
@@ -145,12 +202,9 @@ class toBBox:
                 "Height": ("INT", {"default": 1080}),
                 "WrapArray": ("INT", {"default": 1}),
             },
-            "optional": {
-                "mask": ("MASK",),
-            },
         }
 
-    RETURN_TYPES = ("BBOX", "BBOXES", "STRING")
+    RETURN_TYPES = ("BBOX")
     RETURN_NAMES = ("bbox",)
     FUNCTION = "convert"
     CATEGORY = _CATEGORY
@@ -162,6 +216,29 @@ class toBBox:
         if(WrapArray == 2):
             return ([bbox],)
         return (bbox,)
+class BBoxToXYWH:
+    """Convert x,y,width, height into bbox"""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "bbox": ("BBOX", {"default": None})
+            },
+        }
+
+    RETURN_TYPES = ("INT","INT","INT","INT")
+    RETURN_NAMES = ("X", "Y", "Width", "Height",)
+    FUNCTION = "convert"
+    CATEGORY = _CATEGORY
+
+    def convert(self, bbox):
+        # if bbox is array of bboxes, get first
+        if isinstance(bbox, (list, tuple)) and bbox and isinstance(bbox[0], (list, tuple)):
+            if isinstance(bbox[0], (list, tuple)) and bbox and isinstance(bbox[0][0], (list, tuple)):
+                bbox = bbox[0][0]
+            else:
+                bbox = bbox[0]
+        return bbox[0], bbox[1], bbox[2], bbox[3]
 
 from .utils.vlm_bbox import scale_bbox_to_original
 class restoreBBoxFrom:
@@ -253,20 +330,23 @@ Grow value is the amount to grow the shape on each frame, creating animated mask
                 'triangle',
             ],
             {
-            "default": 'circle'
+            "default": 'square'
              }),
                 "frames": ("INT", {"default": 1,"min": 1, "max": 4096, "step": 1}),
-                "location_x": ("INT", {"default": 256,"min": 0, "max": 4096, "step": 1}),
-                "location_y": ("INT", {"default": 256,"min": 0, "max": 4096, "step": 1}),
                 "grow": ("INT", {"default": 0, "min": -512, "max": 512, "step": 1}),
                 "frame_width": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
                 "frame_height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
+        },
+            "optional": {
+                "bbox": ("BBOX"),
+                "location_x": ("INT", {"default": 256,"min": 0, "max": 4096, "step": 1}),
+                "location_y": ("INT", {"default": 256,"min": 0, "max": 4096, "step": 1}),
                 "shape_width": ("INT", {"default": 128,"min": 8, "max": 4096, "step": 1}),
                 "shape_height": ("INT", {"default": 128,"min": 8, "max": 4096, "step": 1}),
-        },
+            },
     } 
 
-    def createshapemask(self, frames, frame_width, frame_height, location_x, location_y, shape_width, shape_height, grow, shape):
+    def createshapemask(self, frames, frame_width, frame_height, location_x, location_y, shape_width, shape_height, grow, shape,bbox):
         # Define the number of images in the batch
         batch_size = frames
         out = []
@@ -306,18 +386,21 @@ Grow value is the amount to grow the shape on each frame, creating animated mask
 BBOX_NODE_CLASS_MAPPINGS = {
     "KY_BBoxesToSAM2": BBoxesToSAM2,
     "KY_restoreBBox": restoreBBoxFrom,
-    "KY_toBBox": toBBox,
+    "KY_toBBox": XYWHtoBBox,
+    "KY_BBoxToXYWH": BBoxToXYWH,
     "KY_JSONToBBox": JSONToBBox,
     "KY_ImageCropByBBox": ImageCropByBBox,
     "KY_CreateMask": CreateShapeMask,
-    
+    "KY_BBoxPosition": BBoxPosition,
 }
 
 BBOX_NODE_NAME_MAPPINGS = {
     "KY_BBoxesToSAM2": "Prepare BBoxes for SAM2",
     "KY_restoreBBox": "restore bbox from VLM scale",
     "KY_toBBox": "Convert X Y WH into box",
+    "KY_BBoxToXYWH": "Convert BBox to X Y Width Height",
     "KY_JSONToBBox": "json string to bbox",
     "KY_ImageCropByBBox": "Crop Image by bbox",
     "KY_CreateMask": "Crop Mask by xywh",
+    "KY_BBoxPosition": "BBox Image Position",
 }
