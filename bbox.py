@@ -341,8 +341,8 @@ Grow value is the amount to grow the shape on each frame, creating animated mask
                 "bbox": ("BBOX"),
                 "location_x": ("INT", {"default": 256,"min": 0, "max": 4096, "step": 1}),
                 "location_y": ("INT", {"default": 256,"min": 0, "max": 4096, "step": 1}),
-                "shape_width": ("INT", {"default": 128,"min": 8, "max": 4096, "step": 1}),
-                "shape_height": ("INT", {"default": 128,"min": 8, "max": 4096, "step": 1}),
+                "shape_width": ("INT", {"default": 128,"min": 1, "max": 4096, "step": 1}),
+                "shape_height": ("INT", {"default": 128,"min": 1, "max": 4096, "step": 1}),
             },
     } 
 
