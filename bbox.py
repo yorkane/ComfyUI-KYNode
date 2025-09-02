@@ -308,16 +308,15 @@ class ImageCropByBBox:
             pass
         return (results,)
     
-class CreateShapeMask:
+class CreateMask:
     
     RETURN_TYPES = ("MASK", "MASK",)
     RETURN_NAMES = ("mask", "mask_inverted",)
     FUNCTION = "createshapemask"
-    CATEGORY = "KJNodes/masking/generate"
+    CATEGORY = _CATEGORY
     DESCRIPTION = """
-Creates a mask or batch of masks with the specified shape.  
-Locations are center locations.  
-Grow value is the amount to grow the shape on each frame, creating animated masks.
+Creates a mask or batch of masks with the specified shape or bboxes.
+bboxes input will override the shape and width/height parameters.
 """
 
     @classmethod
@@ -338,7 +337,8 @@ Grow value is the amount to grow the shape on each frame, creating animated mask
                 "frame_height": ("INT", {"default": 512,"min": 16, "max": 4096, "step": 1}),
         },
             "optional": {
-                "bbox": ("BBOX"),
+                "bboxes1": ("BBOX",),
+                "bboxes2": ("BBOX",),
                 "location_x": ("INT", {"default": 256,"min": 0, "max": 4096, "step": 1}),
                 "location_y": ("INT", {"default": 256,"min": 0, "max": 4096, "step": 1}),
                 "shape_width": ("INT", {"default": 128,"min": 1, "max": 4096, "step": 1}),
@@ -346,36 +346,81 @@ Grow value is the amount to grow the shape on each frame, creating animated mask
             },
     } 
 
-    def createshapemask(self, frames, frame_width, frame_height, location_x, location_y, shape_width, shape_height, grow, shape,bbox):
+    def createshapemask(self, frames, frame_width, frame_height, location_x, location_y, shape_width, shape_height, grow, shape, bboxes1=None, bboxes2=None):
         # Define the number of images in the batch
         batch_size = frames
         out = []
         color = "white"
+        
+        # Handle bboxes input - could be single bbox or list of bboxes
+        bbox_list1 = []
+        bbox_list2 = []
+        if bboxes1 is not None:
+            # If it's a list of bboxes
+            if isinstance(bboxes1, list) and len(bboxes1) > 0:
+                # Check if it's a list of bboxes (list of lists)
+                if isinstance(bboxes1[0], (list, tuple)):
+                    bbox_list1 = bboxes1
+                else:
+                    # Single bbox passed as list
+                    bbox_list1 = [bboxes1]
+        if bboxes2 is not None:
+            # If it's a list of bboxes
+            if isinstance(bboxes2, list) and len(bboxes2) > 0:
+                # Check if it's a list of bboxes (list of lists)
+                if isinstance(bboxes2[0], (list, tuple)):
+                    bbox_list2 = bboxes2
+                else:
+                    # Single bbox passed as list
+                    bbox_list2 = [bboxes2]
         for i in range(batch_size):
             image = Image.new("RGB", (frame_width, frame_height), "black")
             draw = ImageDraw.Draw(image)
 
             # Calculate the size for this frame and ensure it's not less than 0
-            current_width = max(0, shape_width + i*grow)
-            current_height = max(0, shape_height + i*grow)
 
-            if shape == 'circle' or shape == 'square':
-                # Define the bounding box for the shape
-                left_up_point = (location_x, location_y) # bottom left
-                right_down_point = (location_x + current_width, location_y + current_height) # bottom right
-                two_points = [left_up_point, right_down_point]
 
-                if shape == 'circle':
-                    draw.ellipse(two_points, fill=color)
-                elif shape == 'square':
+            # Draw shapes based on bboxes if provided
+            if bbox_list1:
+                for bbox in bbox_list1:
+                    # Extract bbox coordinates
+                    bbox_x, bbox_y, bbox_w, bbox_h = bbox
+                    current_width = max(0, bbox_w + i*grow)
+                    current_height = max(0, bbox_h + i*grow)
+                    left_up_point = (bbox_x, bbox_y)
+                    right_down_point = (bbox_x + bbox_w, bbox_y + bbox_h)
+                    two_points = [left_up_point, right_down_point]
                     draw.rectangle(two_points, fill=color)
-                    
-            elif shape == 'triangle':
-                # Define the points for the triangle
-                left_up_point = (location_x - current_width // 2, location_y + current_height // 2) # bottom left
-                right_down_point = (location_x + current_width // 2, location_y + current_height // 2) # bottom right
-                top_point = (location_x, location_y - current_height // 2) # top point
-                draw.polygon([top_point, left_up_point, right_down_point], fill=color)
+                for bbox in bbox_list2:
+                    # Extract bbox coordinates
+                    bbox_x, bbox_y, bbox_w, bbox_h = bbox
+                    current_width = max(0, bbox_w + i*grow)
+                    current_height = max(0, bbox_h + i*grow)
+                    left_up_point = (bbox_x, bbox_y)
+                    right_down_point = (bbox_x + bbox_w, bbox_y + bbox_h)
+                    two_points = [left_up_point, right_down_point]
+                    draw.rectangle(two_points, fill=color)
+            else:
+                current_width = max(0, shape_width + i*grow)
+                current_height = max(0, shape_height + i*grow)
+                # Original behavior when no bboxes provided
+                if shape == 'circle' or shape == 'square':
+                    # Define the bounding box for the shape
+                    left_up_point = (location_x, location_y)
+                    right_down_point = (location_x + current_width, location_y + current_height)
+                    two_points = [left_up_point, right_down_point]
+
+                    if shape == 'circle':
+                        draw.ellipse(two_points, fill=color)
+                    elif shape == 'square':
+                        draw.rectangle(two_points, fill=color)
+                        
+                elif shape == 'triangle':
+                    # Define the points for the triangle
+                    left_up_point = (location_x - current_width // 2, location_y + current_height // 2) # bottom left
+                    right_down_point = (location_x + current_width // 2, location_y + current_height // 2) # bottom right
+                    top_point = (location_x, location_y - current_height // 2) # top point
+                    draw.polygon([top_point, left_up_point, right_down_point], fill=color)
 
             image = pil2tensor(image)
             mask = image[:, :, :, 0]
@@ -390,7 +435,7 @@ BBOX_NODE_CLASS_MAPPINGS = {
     "KY_BBoxToXYWH": BBoxToXYWH,
     "KY_JSONToBBox": JSONToBBox,
     "KY_ImageCropByBBox": ImageCropByBBox,
-    "KY_CreateMask": CreateShapeMask,
+    "KY_CreateMask": CreateMask,
     "KY_BBoxPosition": BBoxPosition,
 }
 
