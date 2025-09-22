@@ -446,6 +446,6 @@ BBOX_NODE_NAME_MAPPINGS = {
     "KY_BBoxToXYWH": "Convert BBox to X Y Width Height",
     "KY_JSONToBBox": "json string to bbox",
     "KY_ImageCropByBBox": "Crop Image by bbox",
-    "KY_CreateMask": "Crop Mask by xywh",
+    "KY_CreateMask": "Create Mask by xywh",
     "KY_BBoxPosition": "BBox Image Position",
 }

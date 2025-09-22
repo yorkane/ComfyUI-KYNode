@@ -368,16 +368,103 @@ class KY_LoadImageFrom:
         return (processed_images, processed_masks)
 
 
+class CropImageByXYWH:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "x": ("INT", {"default": 0, "min": 0, "max": 999999}),
+                "y": ("INT", {"default": 0, "min": 0, "max": 999999}),
+                "width": ("INT", {"default": 512, "min": 64, "max": 999999}),
+                "height": ("INT", {"default": 512, "min": 64, "max": 999999}),
+                "divisible_by": ("INT", {"default": 1, "min": 1, "max": 128}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "crop"
+    CATEGORY = _CATEGORY
+    DESCRIPTION = "Crop image by XYWH coordinates with optional divisible size adjustment"
+
+    def crop(self, image, x, y, width, height, divisible_by):
+        # 确保最小尺寸为64
+        width = max(64, width)
+        height = max(64, height)
+        
+        # 优先确保尺寸能被divisible_by整除（只能放大，不能缩小）
+        if divisible_by > 1:
+            # 使用向上取整的方式计算新的尺寸
+            adjusted_width = ((width + divisible_by - 1) // divisible_by) * divisible_by
+            adjusted_height = ((height + divisible_by - 1) // divisible_by) * divisible_by
+        else:
+            adjusted_width = width
+            adjusted_height = height
+            
+        # 获取图像尺寸
+        batch_size, img_height, img_width, channels = image.shape
+        
+        # 优先确保裁剪区域满足divisible_by要求，即使需要调整XY坐标
+        # 首先尝试在原始XY位置进行裁剪
+        x_start = x
+        y_start = y
+        x_end = x_start + adjusted_width
+        y_end = y_start + adjusted_height
+        
+        # 如果裁剪区域超出右边界，调整x_start向左移动
+        if x_end > img_width:
+            x_start = max(0, img_width - adjusted_width)
+            x_end = x_start + adjusted_width
+            
+        # 如果裁剪区域超出下边界，调整y_start向上移动
+        if y_end > img_height:
+            y_start = max(0, img_height - adjusted_height)
+            y_end = y_start + adjusted_height
+            
+        # 确保裁剪区域不小于图像边界
+        x_start = max(0, x_start)
+        y_start = max(0, y_start)
+        x_end = min(img_width, x_end)
+        y_end = min(img_height, y_end)
+        
+        # 再次确保最终尺寸满足divisible_by要求
+        actual_width = x_end - x_start
+        actual_height = y_end - y_start
+        
+        if divisible_by > 1:
+            # 确保实际尺寸能被divisible_by整除
+            actual_width = (actual_width // divisible_by) * divisible_by
+            actual_height = (actual_height // divisible_by) * divisible_by
+            # 重新计算结束点
+            x_end = x_start + actual_width
+            y_end = y_start + actual_height
+            
+            # 再次检查边界
+            if x_end > img_width:
+                x_start = max(0, img_width - actual_width)
+                x_end = x_start + actual_width
+            if y_end > img_height:
+                y_start = max(0, img_height - actual_height)
+                y_end = y_start + actual_height
+        
+        # 执行裁剪
+        cropped_image = image[:, y_start:y_end, x_start:x_end, :]
+        
+        return (cropped_image,)
+
+
 IMG_CLASS_MAPPINGS = {
     "KY_ReadImage": ReadImage,
     "KY_LoadImagesFromFolder": LoadImagesFromFolder,
     "KY_SaveImageToPath": KY_SaveImageToPath,
-    "KY_LoadImageFrom": KY_LoadImageFrom
+    "KY_LoadImageFrom": KY_LoadImageFrom,
+    "KY_CropImageByXYWH": CropImageByXYWH
 }
 
 IMG_NAME_MAPPINGS = {
     "KY_ReadImage": "Read Image from Path",
     "KY_LoadImagesFromFolder": "Load Images From Folder",
     "KY_SaveImageToPath": "Save Images To Path with sequence number",
-    "KY_LoadImageFrom": "Load Image (Path/URL/Base64/Input)"
+    "KY_LoadImageFrom": "Load Image (Path/URL/Base64/Input)",
+    "KY_CropImageByXYWH": "Crop Image by XYWH"
 }
