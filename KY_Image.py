@@ -404,48 +404,37 @@ class CropImageByXYWH:
         # 获取图像尺寸
         batch_size, img_height, img_width, channels = image.shape
         
-        # 优先确保裁剪区域满足divisible_by要求，即使需要调整XY坐标
-        # 首先尝试在原始XY位置进行裁剪
+        # 保持XY起始点不变
         x_start = x
         y_start = y
+        
+        # 计算结束点
         x_end = x_start + adjusted_width
         y_end = y_start + adjusted_height
         
-        # 如果裁剪区域超出右边界，调整x_start向左移动
+        # 如果裁剪区域超出右边界，则调整宽度
         if x_end > img_width:
-            x_start = max(0, img_width - adjusted_width)
+            adjusted_width = img_width - x_start
+            # 确保调整后的宽度仍然满足divisible_by要求
+            if divisible_by > 1:
+                adjusted_width = (adjusted_width // divisible_by) * divisible_by
             x_end = x_start + adjusted_width
             
-        # 如果裁剪区域超出下边界，调整y_start向上移动
+        # 如果裁剪区域超出下边界，则调整高度
         if y_end > img_height:
-            y_start = max(0, img_height - adjusted_height)
+            adjusted_height = img_height - y_start
+            # 确保调整后的高度仍然满足divisible_by要求
+            if divisible_by > 1:
+                adjusted_height = (adjusted_height // divisible_by) * divisible_by
             y_end = y_start + adjusted_height
             
-        # 确保裁剪区域不小于图像边界
-        x_start = max(0, x_start)
-        y_start = max(0, y_start)
+        # 确保裁剪区域有效
         x_end = min(img_width, x_end)
         y_end = min(img_height, y_end)
         
-        # 再次确保最终尺寸满足divisible_by要求
-        actual_width = x_end - x_start
-        actual_height = y_end - y_start
-        
-        if divisible_by > 1:
-            # 确保实际尺寸能被divisible_by整除
-            actual_width = (actual_width // divisible_by) * divisible_by
-            actual_height = (actual_height // divisible_by) * divisible_by
-            # 重新计算结束点
-            x_end = x_start + actual_width
-            y_end = y_start + actual_height
-            
-            # 再次检查边界
-            if x_end > img_width:
-                x_start = max(0, img_width - actual_width)
-                x_end = x_start + actual_width
-            if y_end > img_height:
-                y_start = max(0, img_height - actual_height)
-                y_end = y_start + actual_height
+        # 确保裁剪区域尺寸大于0
+        if x_end <= x_start or y_end <= y_start:
+            raise ValueError("Crop area is invalid. Check your parameters.")
         
         # 执行裁剪
         cropped_image = image[:, y_start:y_end, x_start:x_end, :]
