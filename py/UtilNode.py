@@ -785,7 +785,7 @@ class KY_MergeToJSON:
         return result
 
 
-UTIL_NODE_CLASS_MAPPINGS = {
+NODE_CLASS_MAPPINGS = {
     "KY_JoinToString": KY_JoinToString,
     "KY_RegexReplace": KY_RegexReplace,
     "KY_RegexExtractor": KY_RegexExtractor,
@@ -797,7 +797,7 @@ UTIL_NODE_CLASS_MAPPINGS = {
     "KY_First_NOT_EMPTY": KY_First_NOT_EMPTY,
 }
 
-UTIL_NODE_NAME_MAPPINGS = {
+NODE_DISPLAY_NAME_MAPPINGS = {
     "KY_JoinToString": "Join any into string",
     "KY_RegexReplace": "Replace text by regex",
     "KY_RegexExtractor": "Extract text by regex",

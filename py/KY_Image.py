@@ -442,7 +442,7 @@ class CropImageByXYWH:
         return (cropped_image,)
 
 
-IMG_CLASS_MAPPINGS = {
+NODE_CLASS_MAPPINGS = {
     "KY_ReadImage": ReadImage,
     "KY_LoadImagesFromFolder": LoadImagesFromFolder,
     "KY_SaveImageToPath": KY_SaveImageToPath,
@@ -450,7 +450,7 @@ IMG_CLASS_MAPPINGS = {
     "KY_CropImageByXYWH": CropImageByXYWH
 }
 
-IMG_NAME_MAPPINGS = {
+NODE_DISPLAY_NAME_MAPPINGS = {
     "KY_ReadImage": "Read Image from Path",
     "KY_LoadImagesFromFolder": "Load Images From Folder",
     "KY_SaveImageToPath": "Save Images To Path with sequence number",

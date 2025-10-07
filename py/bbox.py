@@ -428,7 +428,7 @@ bboxes input will override the shape and width/height parameters.
         outstack = torch.cat(out, dim=0)
         return (outstack, 1.0 - outstack,)
 
-BBOX_NODE_CLASS_MAPPINGS = {
+NODE_CLASS_MAPPINGS = {
     "KY_BBoxesToSAM2": BBoxesToSAM2,
     "KY_restoreBBox": restoreBBoxFrom,
     "KY_toBBox": XYWHtoBBox,
@@ -439,7 +439,7 @@ BBOX_NODE_CLASS_MAPPINGS = {
     "KY_BBoxPosition": BBoxPosition,
 }
 
-BBOX_NODE_NAME_MAPPINGS = {
+NODE_DISPLAY_NAME_MAPPINGS = {
     "KY_BBoxesToSAM2": "Prepare BBoxes for SAM2",
     "KY_restoreBBox": "restore bbox from VLM scale",
     "KY_toBBox": "Convert X Y WH into box",

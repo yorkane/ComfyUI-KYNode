@@ -107,12 +107,12 @@ class FileSequenceAnalyzer:
         return (patterns[0], numbers[0], patterns[1], numbers[1])
 
 
-FILE_CLASS_MAPPINGS = {
+NODE_CLASS_MAPPINGS = {
     "KY_FilePathAnalyzer-": FilePathAnalyzer,
     "KY_FileSequenceAnalyzer": FileSequenceAnalyzer,
 }
 
-FILE_NAME_MAPPINGS = {
+NODE_DISPLAY_NAME_MAPPINGS = {
     "KY_FilePathAnalyzer-": "FilePath Analyzer",
     "KY_FileSequenceAnalyzer": "File Sequence Analyzer",
 }

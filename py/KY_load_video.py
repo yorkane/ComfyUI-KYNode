@@ -373,12 +373,12 @@ class CreateVideoObjectFromPath:
         return (video_object,)
 
 
-VIDEO_LOAD_CLASS_MAPPINGS = {
+NODE_CLASS_MAPPINGS = {
     "KY_LoadVideoByPath": LoadVideoByPath,
     "KY_CreateVideoObjectFromPath": CreateVideoObjectFromPath,
 }
 
-VIDEO_LOAD_NAME_MAPPINGS = {
+NODE_DISPLAY_NAME_MAPPINGS = {
     "KY_LoadVideoByPath": "load video from path",
     "KY_CreateVideoObjectFromPath": "create video object from path",
 }

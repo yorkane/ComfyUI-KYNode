@@ -344,12 +344,12 @@ class KY_ToVideoUrl:
 
 
 # 节点映射
-VIDEO_COMPARE_CLASS_MAPPINGS = {
+NODE_CLASS_MAPPINGS = {
     "KY_VideoCompare": VideoCompareNode,
     "KY_ToVideoUrl": KY_ToVideoUrl,
 }
 
-VIDEO_COMPARE_NAME_MAPPINGS = {
+NODE_DISPLAY_NAME_MAPPINGS = {
     "KY_VideoCompare": "Video Compare",
     "KY_ToVideoUrl": "Video Object To String",
 }

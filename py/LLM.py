@@ -43,7 +43,11 @@ class OpenAICaptionImage:
                 ),
                 "caption_prompt": (
                     "STRING",
-                    {"default": "Describe this image without any speculations"},
+                    {"multiline": True, "default": "Describe this image without any speculations"},
+                ),
+                "response_format": (
+                    ["text", "json_object"],
+                    {"default": "text"},
                 ),
                 "max_tokens": ("INT", {"default": 200}),
                 "temperature": ("FLOAT", {"default": 0.5}),
@@ -69,6 +73,7 @@ class OpenAICaptionImage:
         ollama_model,
         system_prompt,
         caption_prompt,
+        response_format,
         max_tokens,
         temperature,
         top_p,
@@ -97,12 +102,12 @@ class OpenAICaptionImage:
             return self._caption_openai(
                 pil_image, custom_model, system_prompt, caption_prompt,
                 max_tokens, temperature, top_p, frequency_penalty, 
-                presence_penalty, base_url, api_key
+                presence_penalty, base_url, api_key, response_format
             )
 
     def _caption_openai(self, pil_image, model, system_prompt, caption_prompt,
                        max_tokens, temperature, top_p, frequency_penalty,
-                       presence_penalty, base_url, api_key):
+                       presence_penalty, base_url, api_key, response_format="text"):
         # Convert PIL Image to base64
         buffered = io.BytesIO()
         pil_image.save(buffered, format="PNG")
@@ -111,10 +116,10 @@ class OpenAICaptionImage:
         # Set up OpenAI client
         client = openai.OpenAI(api_key=api_key, base_url=base_url)
 
-        # Make API call to OpenAI
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
+        # Prepare API call parameters
+        params = {
+            "model": model,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {
                     "role": "user",
@@ -127,13 +132,21 @@ class OpenAICaptionImage:
                     ],
                 },
             ],
-            timeout=30,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            frequency_penalty=frequency_penalty,
-            presence_penalty=presence_penalty,
-        )
+            "timeout": 30,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
+            "frequency_penalty": frequency_penalty,
+            "presence_penalty": presence_penalty,
+        }
+        
+        # Add response_format if json_object is selected
+        if response_format == "json_object":
+            params["response_format"] = {"type": "json_object"}
+        
+        # Make API call to OpenAI
+        response = client.chat.completions.create(**params)
+        
         if response.choices[0].message.content is None:
             raise ValueError("No content in response")
 
@@ -493,13 +506,13 @@ class OpenAIChat:
             raise ValueError(f"Ollama API error: {str(e)}")
 
 
-LLM_CLASS_MAPPINGS = {
+NODE_CLASS_MAPPINGS = {
     "KY_OpenAICaptionImage": OpenAICaptionImage,
     "KY_OpenAICaptionImages": OpenAICaptionImages,
     "KY_OpenAIChat": OpenAIChat,
 }
 
-LLM_NAME_MAPPINGS = {
+NODE_DISPLAY_NAME_MAPPINGS = {
     "KY_OpenAICaptionImage": "KY Caption Image by openai-protocol local LLM services",
     "KY_OpenAICaptionImages": "KY Caption Images Batch by openai-protocol local LLM services",
     "KY_OpenAIChat": "KY Chat with openai-protocol local LLM services",

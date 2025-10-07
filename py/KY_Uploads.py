@@ -167,10 +167,10 @@ class KY_Uploads:
         return None
 
 # 注册节点
-UPLOAD_NODE_CLASS_MAPPINGS = {
+NODE_CLASS_MAPPINGS = {
     "KY_Uploads": KY_Uploads,
 }
 
-UPLOAD_NODE_NAME_MAPPINGS = {
+NODE_DISPLAY_NAME_MAPPINGS = {
     "KY_Uploads": "KY Upload Files",
 }
