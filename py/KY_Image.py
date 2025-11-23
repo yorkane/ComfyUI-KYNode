@@ -155,49 +155,63 @@ class KY_SaveImageToPath:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
-                    {"images": ("IMAGE",),
-                     "img_template": ("STRING", {"default": "IMG-######"}),
-                     "start_index": ("INT", {"default": 1, "min": 0, "max": 999999}),
-                     "quality": ("INT", {"default": 95, "min": 1, "max": 100}),
-                     "extension": (["png", "webp", "jpg"],)},
+                    {"images": ("IMAGE", {"tooltip": "Input image batch to be saved."}),
+                     "img_template": ("STRING", {"default": "IMG-######", "tooltip": "Filename template. Use '#' for sequence numbering (e.g., 'IMG-######'). Supports relative folders (e.g., 'my_folder/img_###')."}),
+                     "start_index": ("INT", {"default": 1, "min": 0, "max": 999999, "tooltip": "Starting number for the sequence (replaces '######' in the template)."}),
+                     "extension": (["png", "webp", "jpg"], {"tooltip": "Output file format."}),
+                     # 合并后的通用质量参数 (适用于 JPEG 和 WebP)
+                     "quality": ("INT", {"default": 95, "min": 1, "max": 100, "tooltip": "Quality for JPEG and WebP (1-100). Higher is better quality. Ignored for PNG."}), 
+                     # PNG 专用压缩等级 (0=快/大, 9=慢/小)
+                     "png_compression": ("INT", {"default": 1, "min": 0, "max": 9, "tooltip": "Compression level for PNG (0-9). 0 is fastest (large file), 9 is slowest (small file). 1 is recommended for speed."}), 
+                     },
                 "optional": {
-                    "overwrite": ("BOOLEAN", {"default": True}),
-                    "NOTSAVE": ("BOOLEAN", {"default": False}),
-                    "show_preview": ("BOOLEAN", {"default": True}),
+                    # WebP 专用无损开关
+                    "webp_lossless": ("BOOLEAN", {"default": False, "tooltip": "Enable WebP lossless mode. If True, quality is forced to 100. Encode speed will be slower."}),
+                    "overwrite": ("BOOLEAN", {"default": True, "tooltip": "If True, overwrites existing files. If False, adds a counter suffix (e.g., -[0001]) to the filename."}),
+                    "NOTSAVE": ("BOOLEAN", {"default": False, "tooltip": "If True, skips the saving process but passes the images through. Useful for debugging logic without writing disk."}),
+                    "show_preview": ("BOOLEAN", {"default": True, "tooltip": "If True, displays the saved images in the node UI. Disable this for maximum performance with large batches."}),
                 },
-                # CV2 版本不支持保存元数据，因此移除了 hidden inputs
                 }
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "save_image_cv2"
     OUTPUT_NODE = True
     CATEGORY = "KY_Nodes"
-    DESCRIPTION = """Ultra-fast image saver using OpenCV (cv2). Note: Does not save metadata."""
+    DESCRIPTION = """Ultra-fast image saver using OpenCV (cv2). 
+    
+    Features:
+    - Multithreaded saving
+    - Supports PNG, JPEG, WebP
+    - Customizable compression/quality
+    - No metadata saving (for speed)
+    """
 
     @staticmethod
-    def save_single_file_cv2(image_np, file_path, extension, quality):
+    def save_single_file_cv2(image_np, file_path, extension, quality, png_compression, webp_lossless):
         try:
             # 1. 格式转换 (ComfyUI RGB -> OpenCV BGR)
             # image_np 是 float32 (0-1)，需要先乘 255 转 uint8
-            # 在线程内做这一步可以分摊 CPU 压力
             img_uint8 = np.clip(image_np * 255.0, 0, 255).astype(np.uint8)
             img_bgr = cv2.cvtColor(img_uint8, cv2.COLOR_RGB2BGR)
             
             # 2. 准备编码参数
             encode_params = []
             if extension == "png":
-                # CV2_IMWRITE_PNG_COMPRESSION: 0-9 (1 最快, 9 最小)
-                encode_params = [int(cv2.IMWRITE_PNG_COMPRESSION), 1]
+                # CV2_IMWRITE_PNG_COMPRESSION: 0-9 (默认为1，追求速度)
+                encode_params = [int(cv2.IMWRITE_PNG_COMPRESSION), png_compression]
+            
             elif extension == "webp":
                 # CV2_IMWRITE_WEBP_QUALITY: 1-100
-                encode_params = [int(cv2.IMWRITE_WEBP_QUALITY), quality]
+                # 如果开启无损，OpenCV 通常需要高质量设置
+                current_quality = 100 if webp_lossless else quality
+                encode_params = [int(cv2.IMWRITE_WEBP_QUALITY), current_quality]
+            
             elif extension == "jpg":
                 # CV2_IMWRITE_JPEG_QUALITY: 0-100
                 encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
 
-            # 3. 编码并写入 (解决中文/特殊字符路径问题)
-            # cv2.imwrite 直接写文件不支持非 ASCII 路径
-            # 使用 imencode 编码到内存 buffer，然后用 python 原生 write 写入
+            # 3. 编码并写入
+            # 使用 imencode 解决中文/特殊字符路径问题
             success, buffer = cv2.imencode(f".{extension}", img_bgr, encode_params)
             
             if success:
@@ -211,7 +225,8 @@ class KY_SaveImageToPath:
             return False
 
     def save_image_cv2(self, images, img_template="IMG-####", 
-                       start_index=1, quality=95, extension="png",
+                       start_index=1, extension="png",
+                       quality=95, png_compression=1, webp_lossless=False,
                        overwrite=True, NOTSAVE=False, show_preview=True):
         if NOTSAVE:
             return {"ui": {"images": []}, "result": (images,)}
@@ -230,13 +245,13 @@ class KY_SaveImageToPath:
         zero_count = template_filename.count('#')
         name_base, _ = os.path.splitext(template_filename)
         
-        # 数据准备：将 Tensor 转为 Numpy
+        # 数据准备 (Tensor -> Numpy)
         images_np = images.cpu().numpy()
         
         tasks = []
         saved_paths = []
         
-        # 预计算文件名 (主线程)
+        # 预计算文件名
         for i in range(len(images_np)):
             if zero_count > 0:
                 current_index = start_index + i
@@ -259,8 +274,8 @@ class KY_SaveImageToPath:
                     current_path = os.path.join(full_output_dir, current_filename)
                     counter += 1
             
-            # 任务: (图片数据片段, 完整路径, 扩展名, 质量)
-            tasks.append((images_np[i], current_path, extension, quality))
+            # 任务参数: (数据, 路径, 扩展名, 质量, PNG压缩等级, WebP无损开关)
+            tasks.append((images_np[i], current_path, extension, quality, png_compression, webp_lossless))
             saved_paths.append(os.path.join(template_dir, current_filename))
 
         # 多线程执行
@@ -279,6 +294,8 @@ class KY_SaveImageToPath:
         
         if show_preview:
             result_dict["ui"] = {"images": [{"filename": p, "type": "output", "subfolder": ""} for p in saved_paths]}
+            
+        return result_dict
             
         return result_dict
 class KY_LoadImageFrom:
