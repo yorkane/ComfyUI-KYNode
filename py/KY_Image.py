@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from PIL import Image, ImageOps
 import cv2
-import base64
+import concurrent.futures
 import comfy.utils
 import folder_paths
 from .utils.net_io import load_images_from_url
@@ -151,108 +151,136 @@ class LoadImagesFromFolder:
             file_names,
         )
 
-
 class KY_SaveImageToPath:
     @classmethod
     def INPUT_TYPES(s):
         return {"required":
                     {"images": ("IMAGE",),
-                     "img_template": ("STRING", {"default": "IMG-######.png"}),
+                     "img_template": ("STRING", {"default": "IMG-######"}),
                      "start_index": ("INT", {"default": 1, "min": 0, "max": 999999}),
-                     "quality": ("INT", {"default": 95, "min": 50, "max": 100}),
+                     "quality": ("INT", {"default": 95, "min": 1, "max": 100}),
                      "extension": (["png", "webp", "jpg"],)},
                 "optional": {
-                    "lossless": ("BOOLEAN", {"default": False}),
-                    "optimize": ("BOOLEAN", {"default": False}),
                     "overwrite": ("BOOLEAN", {"default": True}),
                     "NOTSAVE": ("BOOLEAN", {"default": False}),
+                    "show_preview": ("BOOLEAN", {"default": True}),
                 },
-                "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO"}
+                # CV2 版本不支持保存元数据，因此移除了 hidden inputs
                 }
 
     RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "save_image_to_path"
+    FUNCTION = "save_image_cv2"
     OUTPUT_NODE = True
-    CATEGORY = _CATEGORY
-    DESCRIPTION = """save images to path, accept image batch and file template
-    Default template: IMG-xx-######.png will save to output/IMG-xx-######.png
-    ##### will be replaced by start_index auto-increment (only if # exists in filename)
-    If no # in filename, will use original filename without sequence processing
-    If not overwrite, it will add suffix [####] format (4-digit zero-padded, max 9999)
-    """
+    CATEGORY = "KY_Nodes"
+    DESCRIPTION = """Ultra-fast image saver using OpenCV (cv2). Note: Does not save metadata."""
 
-    def save_image_to_path(self, images, img_template="IMG-####.png", 
-                          start_index=1, quality=95, extension="png",
-                          lossless=False, optimize=False, overwrite=True, NOTSAVE=False,
-                          prompt=None, extra_pnginfo=None):
+    @staticmethod
+    def save_single_file_cv2(image_np, file_path, extension, quality):
+        try:
+            # 1. 格式转换 (ComfyUI RGB -> OpenCV BGR)
+            # image_np 是 float32 (0-1)，需要先乘 255 转 uint8
+            # 在线程内做这一步可以分摊 CPU 压力
+            img_uint8 = np.clip(image_np * 255.0, 0, 255).astype(np.uint8)
+            img_bgr = cv2.cvtColor(img_uint8, cv2.COLOR_RGB2BGR)
+            
+            # 2. 准备编码参数
+            encode_params = []
+            if extension == "png":
+                # CV2_IMWRITE_PNG_COMPRESSION: 0-9 (1 最快, 9 最小)
+                encode_params = [int(cv2.IMWRITE_PNG_COMPRESSION), 1]
+            elif extension == "webp":
+                # CV2_IMWRITE_WEBP_QUALITY: 1-100
+                encode_params = [int(cv2.IMWRITE_WEBP_QUALITY), quality]
+            elif extension == "jpg":
+                # CV2_IMWRITE_JPEG_QUALITY: 0-100
+                encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+
+            # 3. 编码并写入 (解决中文/特殊字符路径问题)
+            # cv2.imwrite 直接写文件不支持非 ASCII 路径
+            # 使用 imencode 编码到内存 buffer，然后用 python 原生 write 写入
+            success, buffer = cv2.imencode(f".{extension}", img_bgr, encode_params)
+            
+            if success:
+                with open(file_path, "wb") as f:
+                    f.write(buffer)
+                return True
+            return False
+            
+        except Exception as e:
+            print(f"Error saving {file_path}: {e}")
+            return False
+
+    def save_image_cv2(self, images, img_template="IMG-####", 
+                       start_index=1, quality=95, extension="png",
+                       overwrite=True, NOTSAVE=False, show_preview=True):
         if NOTSAVE:
-            return images
-        saved_paths = []
-        
-        # 分离目录和文件名模板
+            return {"ui": {"images": []}, "result": (images,)}
+
+        # 路径处理
         template_dir = os.path.dirname(img_template)
         template_filename = os.path.basename(img_template)
         
-        # 判断是否为绝对路径
         if os.path.isabs(template_dir):
             full_output_dir = template_dir
         else:
-            # 相对路径则基于输出目录
             full_output_dir = os.path.join(folder_paths.get_output_directory(), template_dir)
         
-        # 确保目录存在
         os.makedirs(full_output_dir, exist_ok=True)
         
-        # 计算需要补零的位数
         zero_count = template_filename.count('#')
-        name, ext = os.path.splitext(template_filename)
+        name_base, _ = os.path.splitext(template_filename)
         
-        # 保存所有图片
-        for i, image in enumerate(images):
-            # 只有当文件名中包含#占位符时才进行补零和序列处理
+        # 数据准备：将 Tensor 转为 Numpy
+        images_np = images.cpu().numpy()
+        
+        tasks = []
+        saved_paths = []
+        
+        # 预计算文件名 (主线程)
+        for i in range(len(images_np)):
             if zero_count > 0:
-                # 生成文件名
                 current_index = start_index + i
                 number_str = str(current_index).zfill(zero_count)
-                
-                # 替换模板中的 # 为实际数字
-                current_name = name.replace('#' * zero_count, number_str)
-                current_filename = f"{current_name}.{extension}"
+                current_name = name_base.replace('#' * zero_count, number_str)
             else:
-                # 如果没有占位符，直接使用原始文件名
-                current_name = name
-                current_filename = f"{current_name}.{extension}"
+                current_name = name_base
+            
+            current_filename = f"{current_name}.{extension}"
             current_path = os.path.join(full_output_dir, current_filename)
-
-            # 检查文件是否存在且不允许覆盖
+            
+            # 覆盖/重命名逻辑
             if not overwrite and os.path.exists(current_path):
-                # 自动为文件名添加后缀，格式为[####]，4位0填充
                 counter = 1
-                file_name_base, file_ext = os.path.splitext(current_filename)
+                base_n, file_e = os.path.splitext(current_filename)
                 while os.path.exists(current_path):
                     if counter > 9999:
-                        raise ValueError(f'已经存在文件后缀超过最大值9999: {current_path}')
-                    current_filename = f"{file_name_base}-[{str(counter).zfill(4)}]{file_ext}"
+                         raise ValueError(f'Suffix limit exceeded: {current_path}')
+                    current_filename = f"{base_n}-[{str(counter).zfill(4)}]{file_e}"
                     current_path = os.path.join(full_output_dir, current_filename)
                     counter += 1
-
-            # 转换并保存图片
-            img = Image.fromarray((image.cpu().numpy() * 255).astype(np.uint8))
-            img.save(current_path,
-                    quality=quality,
-                    lossless=lossless if extension == "webp" else None,
-                    optimize=optimize)
             
-            # 生成相对路径用于返回
-            relative_path = os.path.join(template_dir, current_filename)
-            saved_paths.append(relative_path)
+            # 任务: (图片数据片段, 完整路径, 扩展名, 质量)
+            tasks.append((images_np[i], current_path, extension, quality))
+            saved_paths.append(os.path.join(template_dir, current_filename))
 
-        return {
-            "ui": {"images": saved_paths},
-            "result": (images,)
-        }
+        # 多线程执行
+        # CV2 释放 GIL 做得很好，因此可以跑满 CPU
+        max_workers = min(32, (os.cpu_count() or 1) + 4)
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(self.save_single_file_cv2, *task) 
+                for task in tasks
+            ]
+            concurrent.futures.wait(futures)
 
-
+        # 构建返回结果
+        result_dict = {"result": (images,)}
+        
+        if show_preview:
+            result_dict["ui"] = {"images": [{"filename": p, "type": "output", "subfolder": ""} for p in saved_paths]}
+            
+        return result_dict
 class KY_LoadImageFrom:
     _CATEGORY = 'KYNode/image'  # Using the common category from the file
 
