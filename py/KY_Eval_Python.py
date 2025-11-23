@@ -1,8 +1,9 @@
 import types
 
 from server import PromptServer
-from aiohttp import web
-from asyncio import sleep, run
+import sys
+import io
+import traceback
 import json, re, traceback
 
 remove_type_name = re.compile(r"(\{.*\})", re.I | re.M)
@@ -36,7 +37,7 @@ class ByPassTypeTuple(tuple):
 
 
 class KY_Eval_Python:
-    def __init__(self):
+    def __init__(self): 
         self.js_complete = False
         self.js_result = None
 
@@ -54,9 +55,9 @@ from time import strftime
 def runCode():
     nowDataTime = strftime("%Y-%m-%d %H:%M:%S")
     return f"Hello ComfyUI with us today {nowDataTime}!"
-r0_str = runCode() + unique_id
-"""
-                    },
+r0_str = runCode()
+""",
+"multiline": True},
                 ),
             },
             "hidden": {"unique_id": "UNIQUE_ID", "extra_pnginfo": "EXTRA_PNGINFO"},
@@ -86,19 +87,23 @@ r0_str = runCode() + unique_id
         # if extra_data and 'extra_data' in extra_data and 'prompt_id' in extra_data['extra_data']:
         #     prompt_id = prompt['extra_data']['prompt_id']
         # outputs['p0_str'] = p0_str
-        
             
         my_namespace.__dict__.update(outputs)            
         my_namespace.__dict__.update({prop: kwargs[prop] for prop in kwargs})
         # my_namespace.__dict__.setdefault("r0_str", "The r0 variable is not assigned")
-
         try:
             exec(pycode, my_namespace.__dict__)
         except Exception as e:
-            err=traceback.format_exc()
-            mc = re.search(r'line (\d+), in <module>([\w\W]+)$', err, re.MULTILINE)
-            msg = mc[1] + ':'+mc[2]
-            my_namespace.r0 = f"Error Line{msg}"
+            err = traceback.format_exc()
+            tb = traceback.extract_tb(sys.exc_info()[2])
+            line_no = tb[-1].lineno if tb else 0
+            PromptServer.instance.send_sync("python_editor_error", {
+                "error": str(e),
+                "line": line_no,
+                "node_id": unique_id
+            })
+            print(f"Python执行错误 (节点ID: {unique_id}): 第{line_no}行 - {str(e)}")
+            raise
 
         new_dict = {key: my_namespace.__dict__[key] for key in my_namespace.__dict__ if key not in ['__builtins__', *kwargs.keys()] and not callable(my_namespace.__dict__[key])}
         return (*new_dict.values(),)
