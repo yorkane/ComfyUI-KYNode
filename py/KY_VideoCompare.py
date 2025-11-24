@@ -353,3 +353,143 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "KY_VideoCompare": "Video Compare",
     "KY_ToVideoUrl": "Video Object To String",
 }
+
+def _ensure_output_subdir():
+    base = folder_paths.get_output_directory()
+    subfolder = "ky_compare"
+    out_dir = os.path.join(base, subfolder)
+    os.makedirs(out_dir, exist_ok=True)
+    return out_dir, subfolder
+
+def _to_uint8_rgb(arr):
+    arr = np.array(arr)
+    if arr.ndim == 4:
+        arr = arr[0]
+    if arr.ndim == 3:
+        if arr.shape[-1] in (1, 3):
+            pass
+        elif arr.shape[0] in (1, 3):
+            arr = np.transpose(arr, (1, 2, 0))
+    if arr.ndim == 2:
+        arr = np.stack([arr] * 3, axis=-1)
+    if arr.dtype in (np.float32, np.float64):
+        m = float(np.nanmax(arr)) if arr.size else 1.0
+        if m <= 1.0:
+            arr = arr * 255.0
+    arr = np.clip(arr, 0, 255).astype(np.uint8)
+    if arr.ndim == 3 and arr.shape[2] == 1:
+        arr = np.repeat(arr, 3, axis=2)
+    return arr
+
+def save_image_to_output(img, name_prefix="img"):
+    out_dir, subfolder = _ensure_output_subdir()
+    filename = f"{name_prefix}_{abs(hash(str(img)))}.png"
+    fullpath = os.path.join(out_dir, filename)
+    if isinstance(img, Image.Image):
+        img.save(fullpath)
+    elif isinstance(img, np.ndarray):
+        Image.fromarray(_to_uint8_rgb(img)).save(fullpath)
+    elif isinstance(img, torch.Tensor):
+        arr = img.detach().cpu().numpy()
+        Image.fromarray(_to_uint8_rgb(arr)).save(fullpath)
+    else:
+        return ""
+    return f"/api/view?filename={filename}&type=output&subfolder={subfolder}"
+
+def process_image_object(image_obj):
+    if image_obj is None:
+        return ""
+    # if has typical attributes
+    if hasattr(image_obj, 'filename'):
+        filename = getattr(image_obj, 'filename', '')
+        subfolder = getattr(image_obj, 'subfolder', '')
+        type_ = getattr(image_obj, 'type', 'input')
+        return f"/api/view?type={type_}&filename={filename}&subfolder={subfolder}"
+    if isinstance(image_obj, dict):
+        if "filename" in image_obj:
+            filename = image_obj["filename"]
+            subfolder = image_obj.get("subfolder", "")
+            type_ = image_obj.get("type", "input")
+            return f"/api/view?type={type_}&filename={filename}&subfolder={subfolder}"
+        if "path" in image_obj:
+            path = image_obj["path"]
+            filename = os.path.basename(path)
+            subfolder = os.path.dirname(path)
+            return f"/api/view?filename={filename}&subfolder={subfolder}&type=input"
+        if "image" in image_obj:
+            return save_image_to_output(image_obj["image"])
+        if "images" in image_obj:
+            imgs = image_obj["images"]
+            if isinstance(imgs, (list, tuple)) and imgs:
+                return save_image_to_output(imgs[0])
+    if isinstance(image_obj, str):
+        if os.path.exists(image_obj):
+            filename = os.path.basename(image_obj)
+            subfolder = os.path.dirname(image_obj)
+            return f"/api/view?filename={filename}&subfolder={subfolder}&type=input"
+        return image_obj
+    # save arbitrary object to output and return view url
+    return save_image_to_output(image_obj)
+
+
+class ImageCompareNode:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "optional": {
+                "image_a_url_or_filepath": ("STRING", {
+                    "placeholder": "http(s)://... or local path",
+                    "default": "",
+                    "multiline": False
+                }),
+                "image_b_url_or_filepath": ("STRING", {
+                    "placeholder": "http(s)://... or local path",
+                    "default": "",
+                    "multiline": False
+                }),
+                "image_a": ("IMAGE",),
+                "image_b": ("IMAGE",),
+            }
+        }
+
+    RETURN_TYPES = ()
+    FUNCTION = "compare_images"
+    CATEGORY = 'KYNode/image'
+    DESCRIPTION = "对比两张图片（支持URL、本地文件或图像对象）"
+    OUTPUT_NODE = True
+
+    def compare_images(self, image_a_url_or_filepath="", image_b_url_or_filepath="", image_a=None, image_b=None):
+        image_a_source = ""
+        image_b_source = ""
+
+        if image_a is not None:
+            image_a_source = process_image_object(image_a)
+        if image_b is not None:
+            image_b_source = process_image_object(image_b)
+
+        if image_a_url_or_filepath is not None and not str(image_a_url_or_filepath).startswith("http"):
+            image_a_url_or_filepath = process_image_object(image_a_url_or_filepath)
+        if image_b_url_or_filepath is not None and not str(image_b_url_or_filepath).startswith("http"):
+            image_b_url_or_filepath = process_image_object(image_b_url_or_filepath)
+
+        image_a_source = image_a_url_or_filepath if image_a_url_or_filepath else image_a_source
+        image_b_source = image_b_url_or_filepath if image_b_url_or_filepath else image_b_source
+
+        if isinstance(image_a_source, list):
+            image_a_source = ''.join(image_a_source)
+        if isinstance(image_b_source, list):
+            image_b_source = ''.join(image_b_source)
+
+        result = {
+            "ui": {
+                "image_a_source": image_a_source,
+                "image_b_source": image_b_source
+            },
+            "result": ()
+        }
+        print(f"Returning image result: {result}")
+        return result
+
+
+NODE_CLASS_MAPPINGS["KY_ImageCompare"] = ImageCompareNode
+NODE_DISPLAY_NAME_MAPPINGS["KY_ImageCompare"] = "Image Compare"

@@ -6,73 +6,87 @@ import { api } from "/scripts/api.js";
 app.registerExtension({
     name: "KYNode.VideoCompare",
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
-        // 检查是否为我们的视频对比节点
         if (nodeData.name === "KY_VideoCompare") {
-            console.log("Registering KY_VideoCompare node extension");
-            
-            // 当节点创建时，添加一个处理函数
             const onNodeCreated = nodeType.prototype.onNodeCreated;
             nodeType.prototype.onNodeCreated = function () {
                 const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
-                
-                console.log("KY_VideoCompare node created");
-                
-                // 创建一个用于显示视频对比的预览窗口
-                this.previewWidget = this.addWidget("button", "Video Compare URL", "预览", () => {
-                    console.log("Preview button clicked");
-                    // 获取节点的输入值
-                    const mode = this.widgets.find(w => w.name === "mode")?.value || "url";
-                    let videoAUrl = "";
-                    let videoBUrl = "";
-                    
-                    if (mode === "url") {
-                        videoAUrl = this.widgets.find(w => w.name === "video_a_url")?.value || "";
-                        videoBUrl = this.widgets.find(w => w.name === "video_b_url")?.value || "";
-                    }
-                    
-                    // 打开新的窗口显示视频对比
-                    openVideoCompareWindow(videoAUrl, videoBUrl);
+                ensureVCStyle();
+                this.compareWidget = this.addWidget("button", "🔍 Compare", null, () => {
+                    const savedA = this._vcLastA;
+                    const savedB = this._vcLastB;
+                    const a = (savedA !== undefined && savedA !== null && savedA !== "")
+                        ? savedA
+                        : (this.widgets.find(w => w.name === "video_a_url_or_filepath")?.value || "");
+                    const b = (savedB !== undefined && savedB !== null && savedB !== "")
+                        ? savedB
+                        : (this.widgets.find(w => w.name === "video_b_url_or_filepath")?.value || "");
+                    openCompareDialog(a, b);
                 });
-                
+                this.clearWidget = this.addWidget("button", "🧹 Clear", null, () => {
+                    const wa = this.widgets.find(w => w.name === "video_a_url_or_filepath");
+                    const wb = this.widgets.find(w => w.name === "video_b_url_or_filepath");
+                    if (wa) wa.value = "";
+                    if (wb) wb.value = "";
+                });
                 return r;
             };
-            
-            // 处理来自节点的UI输出
             const onExecuted = nodeType.prototype.onExecuted;
             nodeType.prototype.onExecuted = function (message) {
-                console.log("KY_VideoCompare onExecuted called with message:", message);
                 onExecuted?.apply(this, arguments);
-                
-                // 检查消息中是否包含我们需要的数据
-                if (message && typeof message === 'object') {
-                    // 确保我们获取的是字符串而不是数组
-                    let videoAUrl = message.video_a_source || "";
-                    let videoBUrl = message.video_b_source || "";
-                    const mode = message.mode || "url";
-                    
-                    // 如果是数组，转换为字符串
-                    if (Array.isArray(videoAUrl)) {
-                        videoAUrl = videoAUrl.join('');
-                        console.log("Converted videoAUrl from array to string:", videoAUrl);
-                    }
-                    if (Array.isArray(videoBUrl)) {
-                        videoBUrl = videoBUrl.join('');
-                        console.log("Converted videoBUrl from array to string:", videoBUrl);
-                    }
-                    
-                    console.log("Extracted data from message:");
-                    console.log("Video A URL:", videoAUrl);
-                    console.log("Video B URL:", videoBUrl);
-                    
-                    // 只有当至少有一个视频URL不为空时才打开窗口
-                    if (videoAUrl || videoBUrl) {
-                        console.log("Opening video compare window from onExecuted");
-                        openVideoCompareWindow(videoAUrl, videoBUrl);
-                    } else {
-                        console.log("Both video URLs are empty, not opening window");
-                    }
-                } else {
-                    console.log("Message is not a valid object or is empty");
+                if (message && typeof message === "object") {
+                    let a = message.video_a_source || "";
+                    let b = message.video_b_source || "";
+                    if (Array.isArray(a)) a = a.join("");
+                    if (Array.isArray(b)) b = b.join("");
+                    this._vcLastA = a;
+                    this._vcLastB = b;
+                    const wa = this.widgets.find(w => w.name === "video_a_url_or_filepath");
+                    const wb = this.widgets.find(w => w.name === "video_b_url_or_filepath");
+                    if (wa && !isTempPreview(a)) wa.value = a;
+                    if (wb && !isTempPreview(b)) wb.value = b;
+                    if (vcDialog) updateCompareDialog(a, b);
+                }
+            };
+        }
+        if (nodeData.name === "KY_ImageCompare") {
+            const onNodeCreated = nodeType.prototype.onNodeCreated;
+            nodeType.prototype.onNodeCreated = function () {
+                const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
+                ensureVCStyle();
+                this.compareWidget = this.addWidget("button", "🔍 Compare", null, () => {
+                    const savedA = this._icLastA;
+                    const savedB = this._icLastB;
+                    const a = (savedA !== undefined && savedA !== null && savedA !== "")
+                        ? savedA
+                        : (this.widgets.find(w => w.name === "image_a_url_or_filepath")?.value || "");
+                    const b = (savedB !== undefined && savedB !== null && savedB !== "")
+                        ? savedB
+                        : (this.widgets.find(w => w.name === "image_b_url_or_filepath")?.value || "");
+                    openImageCompareDialog(a, b);
+                });
+                this.clearWidget = this.addWidget("button", "🧹 Clear", null, () => {
+                    const wa = this.widgets.find(w => w.name === "image_a_url_or_filepath");
+                    const wb = this.widgets.find(w => w.name === "image_b_url_or_filepath");
+                    if (wa) wa.value = "";
+                    if (wb) wb.value = "";
+                });
+                return r;
+            };
+            const onExecuted = nodeType.prototype.onExecuted;
+            nodeType.prototype.onExecuted = function (message) {
+                onExecuted?.apply(this, arguments);
+                if (message && typeof message === "object") {
+                    let a = message.image_a_source || "";
+                    let b = message.image_b_source || "";
+                    if (Array.isArray(a)) a = a.join("");
+                    if (Array.isArray(b)) b = b.join("");
+                    this._icLastA = a;
+                    this._icLastB = b;
+                    const wa = this.widgets.find(w => w.name === "image_a_url_or_filepath");
+                    const wb = this.widgets.find(w => w.name === "image_b_url_or_filepath");
+                    if (wa && !isTempPreview(a)) wa.value = a;
+                    if (wb && !isTempPreview(b)) wb.value = b;
+                    if (vcDialog) updateImageCompareDialog(a, b);
                 }
             };
         }
@@ -80,170 +94,261 @@ app.registerExtension({
 });
 
 // 打开视频对比窗口的函数
-function openVideoCompareWindow(videoAUrl, videoBUrl) {    
-    // 处理undefined或null值并确保是字符串
-    videoAUrl = (videoAUrl || "").toString();
-    videoBUrl = (videoBUrl || "").toString();
-    
-    // 如果是数组，转换为字符串
-    if (Array.isArray(videoAUrl)) {
-        videoAUrl = videoAUrl.join('');
-    }
-    if (Array.isArray(videoBUrl)) {
-        videoBUrl = videoBUrl.join('');
-    }
-    
-    // 创建一个新窗口显示视频对比
-    const htmlContent = `
-<html><head>
-  <meta charset="UTF-8">
-    <title>Video Compare</title>
-<style>
-body {
-  background: #333;
-  margin: 4px;
-}
-#video-compare-container {
-  display: inline-block;
-  line-height: 0;
-  position: relative;
-  width: 100%;
-  padding-top: 42.3%;
-}
-#video-compare-container > video {
-  width: 100%;
-  position: absolute;
-  top: 0; height: 100%;
-}
-#video-clipper {
-  width: 50%; position: absolute;
-  top: 0; bottom: 0;
-  overflow: hidden;
-  border-right: 1px dashed #ccc;
-}
-#video-clipper video {
-  width: 200%;
-  position: absolute;
-  height: 100%;
-}
-#title1 {
-    color: #ccc;
-    float: right;
-}
-#title2 { 
-    color: #ccc;
-    float: left;
-}
-.controls {
-  margin: 5px 0;
-  text-align: center;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.controls button {
-  padding: 5px;
-  background: #444;
-  color: white;
-  border: 1px solid #666;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.controls button:hover {
-  background: #555;
-}
-.controls input {
-  padding: 4px;
-  flex: 1;
-  max-width: 49%;
-}
-</style>
-  
-</head>
+let vcStyleInjected = false;
+let vcDialog = null;
+function isTempPreview(u){ if(!u || typeof u !== 'string') return false; return (u.includes('/api/view?') && (u.includes('subfolder=ky_compare') || u.includes('type=temp'))); }
 
-<body translate="no">
-  <div class="controls">
-    <button id="reload-btn">Reload</button>
-    <input type="text" id="videoA-url" placeholder="Video A URL" value="https://s3-us-west-2.amazonaws.com/s.cdpn.io/4273/floodplain-dirty.mp4">
-    <input type="text" id="videoB-url" placeholder="Video B URL" value="https://s3-us-west-2.amazonaws.com/s.cdpn.io/4273/floodplain-clean.mp4">
-  </div>
-  
-  <div id="video-compare-container">
-  <video loop="" autoplay="" muted="">
-    <source src="${videoAUrl}">
-  </video>
- <div id="video-clipper">
-    <video loop="" autoplay="" muted="" style="width: 200%; z-index: 3;">
-      <source src="${videoBUrl}">
-    </video>
-  </div>
-	</div>
-      <script id="rendered-js">
-function trackLocation(e) {
-  var rect = videoContainer.getBoundingClientRect(),
-  position = (e.pageX - rect.left) / videoContainer.offsetWidth * 100;
-  if (position <= 100) {
-    videoClipper.style.width = position + "%";
-    clippedVideo.style.width = 100 / position * 100 + "%";
-    clippedVideo.style.zIndex = 3;
-  }
-}
-
-function reloadVideos() {
-  var videoAUrl = document.getElementById('videoA-url').value;
-  var videoBUrl = document.getElementById('videoB-url').value;
-  
-  var videoContainer = document.getElementById("video-compare-container");
-  var videoA = videoContainer.getElementsByTagName("video")[0];
-  var videoB = clippedVideo;
-  
-  videoA.getElementsByTagName('source')[0].src = videoAUrl;
-  videoB.getElementsByTagName('source')[0].src = videoBUrl;
-  
-  videoA.load();
-  videoB.load();
-}
-
-var videoContainer = document.getElementById("video-compare-container"),
-videoClipper = document.getElementById("video-clipper"),
-clippedVideo = videoClipper.getElementsByTagName("video")[0];
-videoContainer.addEventListener("mousemove", trackLocation, false);
-videoContainer.addEventListener("touchstart", trackLocation, false);
-videoContainer.addEventListener("touchmove", trackLocation, false);
-var videoA = videoContainer.getElementsByTagName("video")[0];
-var videoB = clippedVideo
-
-document.getElementById('reload-btn').addEventListener('click', reloadVideos);
-        // 视频加载完成后同步播放
-        videoA.addEventListener('loadeddata', function() {
-            if (videoB.readyState >= 3) {
-                videoA.play();
-                videoB.play();
-            }
-        });
-        videoB.addEventListener('loadeddata', function() {
-            if (videoA.readyState >= 3) {
-                videoA.play();
-                videoB.play();
-            }
-        });
-        // 处理视频播放同步
-        function syncVideos() {
-            if (videoA.paused && videoB.paused) return;
-            
-            const diff = Math.abs(videoA.currentTime - videoB.currentTime);
-            if (diff > 0.1) {
-                // 同步视频时间
-                videoB.currentTime = videoA.currentTime;
-            }
-        }
-        // 定期同步视频
-        setInterval(syncVideos, 100);
-</script></body></html>
+function ensureVCStyle() {
+    if (vcStyleInjected) return;
+    const style = document.createElement("style");
+    style.id = "ky-video-compare-style";
+    style.textContent = `
+    .ky-vc-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:10000;display:flex;justify-content:center;align-items:center}
+    .ky-vc-content{width:100vw;height:100vh;background:var(--comfy-menu-bg);border-radius:0;border:1px solid var(--border-color);display:flex;flex-direction:column;overflow:hidden}
+    .ky-vc-content.ky-vc-fullscreen{border:none}
+    .ky-vc-header{padding:8px;background:var(--bg-color);border-bottom:1px solid var(--border-color);display:flex;gap:10px;align-items:center}
+    .ky-vc-content.ky-vc-fullscreen .ky-vc-header{display:none}
+    .ky-vc-controls{display:flex;gap:8px;flex:1}
+    .ky-vc-input{flex:1;background:var(--input-bg);color:var(--input-text);border:1px solid var(--border-color);border-radius:4px;padding:4px 8px;font-size:12px}
+    .ky-vc-btn{padding:5px 12px;background:var(--comfy-input-bg);border:1px solid var(--border-color);color:var(--fg-color);border-radius:4px;cursor:pointer}
+    .ky-vc-btn.primary{background:var(--p-700);color:#fff}
+    .ky-vc-body{flex:1;padding:0}
+    #ky-vc-container{position:relative;width:100%;height:100%;line-height:0;background:#000}
+    #ky-vc-container>video{position:absolute;top:0;left:0;background:#000}
+    #ky-vc-container>img{position:absolute;top:0;left:0;background:#000}
+    #ky-vc-clipper{width:50%;position:absolute;top:0;bottom:0;overflow:hidden;border-right:1px dashed #ccc}
+    #ky-vc-clipper video{position:absolute;top:0;left:0;background:#000}
+    #ky-vc-clipper img{position:absolute;top:0;left:0;background:#000}
     `;
-    
-    // 创建新窗口
-    const newWindow = window.open("", "_blank");
-    newWindow.document.write(htmlContent);
-    newWindow.document.close();
+    document.head.appendChild(style);
+    vcStyleInjected = true;
+}
+
+function openCompareDialog(a, b) {
+    ensureVCStyle();
+    closeCompareDialog();
+    vcDialog = document.createElement("div");
+    vcDialog.className = "ky-vc-overlay";
+    const content = document.createElement("div");
+    content.className = "ky-vc-content";
+    content.innerHTML = `
+        <div class="ky-vc-header">
+            <button class="ky-vc-btn" id="ky-vc-close">✖ Close</button>
+            <div class="ky-vc-controls">
+                <button class="ky-vc-btn primary" id="ky-vc-reload">🔄 Reload</button>
+                <button class="ky-vc-btn" id="ky-vc-fs">⛶ FullScreen</button>
+                <input class="ky-vc-input" id="ky-vc-a" placeholder="Video A URL">
+                <input class="ky-vc-input" id="ky-vc-b" placeholder="Video B URL">
+            </div>
+        </div>
+        <div class="ky-vc-body">
+            <div id="ky-vc-container">
+                <video loop autoplay muted>
+                    <source id="ky-vc-a-src">
+                </video>
+                <div id="ky-vc-clipper">
+                    <video loop autoplay muted style="width:200%;z-index:3;">
+                        <source id="ky-vc-b-src">
+                    </video>
+                </div>
+            </div>
+        </div>
+    `;
+    vcDialog.appendChild(content);
+    document.body.appendChild(vcDialog);
+    const inpA = content.querySelector('#ky-vc-a');
+    const inpB = content.querySelector('#ky-vc-b');
+    const aSrc = content.querySelector('#ky-vc-a-src');
+    const bSrc = content.querySelector('#ky-vc-b-src');
+    const vContainer = content.querySelector('#ky-vc-container');
+    const clipper = content.querySelector('#ky-vc-clipper');
+    const vA = vContainer.getElementsByTagName('video')[0];
+    const vB = clipper.getElementsByTagName('video')[0];
+    function toStr(x){return (Array.isArray(x)?x.join(''):x||"").toString();}
+    inpA.value = toStr(a);
+    inpB.value = toStr(b);
+    aSrc.src = toStr(a);
+    bSrc.src = toStr(b);
+    vA.load();
+    vB.load();
+    function track(e){const rect=vContainer.getBoundingClientRect();const pos=(e.pageX-rect.left)/vContainer.offsetWidth*100;if(pos<=100){clipper.style.width=pos+"%";vB.style.zIndex=3;}}
+    function layout(){
+        const cw = vContainer.clientWidth; const ch = vContainer.clientHeight;
+        const aw = vA.videoWidth||1920; const ah = vA.videoHeight||1080;
+        const ar = aw/ah; let tw, th;
+        if (cw/ch > ar) { th = ch; tw = Math.round(ch*ar); } else { tw = cw; th = Math.round(cw/ar); }
+        const left = Math.round((cw - tw)/2); const top = Math.round((ch - th)/2);
+        Object.assign(vA.style,{width:tw+"px",height:th+"px",left:left+"px",top:top+"px"});
+        Object.assign(vB.style,{width:tw+"px",height:th+"px",left:left+"px",top:top+"px"});
+    }
+    function onMeta(){layout();}
+    vA.addEventListener('loadedmetadata', onMeta);
+    vB.addEventListener('loadedmetadata', onMeta);
+    window.addEventListener('resize', layout);
+    vContainer.addEventListener('mousemove',track,false);
+    vContainer.addEventListener('touchstart',track,false);
+    vContainer.addEventListener('touchmove',track,false);
+    function sync(){if(vA.paused&&vB.paused)return;const d=Math.abs(vA.currentTime-vB.currentTime);if(d>0.1){vB.currentTime=vA.currentTime;}}
+    const syncTimer=setInterval(sync,100);
+    content.querySelector('#ky-vc-reload').addEventListener('click',()=>{aSrc.src=inpA.value;bSrc.src=inpB.value;vA.load();vB.load();});
+    const closeBtn=content.querySelector('#ky-vc-close');
+    const fsBtn=content.querySelector('#ky-vc-fs');
+    function close(){clearInterval(syncTimer);closeCompareDialog();}
+    closeBtn.addEventListener('click',close);
+    vcDialog.addEventListener('click',(e)=>{if(e.target===vcDialog) close();});
+    fsBtn.addEventListener('click',()=>{
+        const el = content;
+        if (!document.fullscreenElement) {
+            el.requestFullscreen?.();
+            el.classList.add('ky-vc-fullscreen');
+        } else {
+            document.exitFullscreen?.();
+            el.classList.remove('ky-vc-fullscreen');
+        }
+    });
+    document.addEventListener('fullscreenchange', ()=>{
+        const isFs = document.fullscreenElement === content;
+        content.classList.toggle('ky-vc-fullscreen', isFs);
+        layout();
+    });
+    vcDialog.tabIndex=-1;vcDialog.addEventListener('keydown',(e)=>{
+        if(e.key==='Escape'){
+            e.preventDefault();
+            if(document.fullscreenElement){
+                document.exitFullscreen?.();
+                return;
+            }
+            close();
+        } else if (e.key.toLowerCase()==='f') {
+            e.preventDefault();
+            if (!document.fullscreenElement) { content.requestFullscreen?.(); content.classList.add('ky-vc-fullscreen'); }
+            else { document.exitFullscreen?.(); content.classList.remove('ky-vc-fullscreen'); }
+        }
+    });
+    vcDialog.focus();
+    layout();
+}
+
+function updateCompareDialog(a,b){
+    if(!vcDialog) return openCompareDialog(a,b);
+    const content = vcDialog.querySelector('.ky-vc-content');
+    const inpA = content.querySelector('#ky-vc-a');
+    const inpB = content.querySelector('#ky-vc-b');
+    const aSrc = content.querySelector('#ky-vc-a-src');
+    const bSrc = content.querySelector('#ky-vc-b-src');
+    function toStr(x){return (Array.isArray(x)?x.join(''):x||"").toString();}
+    const sa = toStr(a); const sb = toStr(b);
+    inpA.value = sa; inpB.value = sb;
+    aSrc.src = sa; bSrc.src = sb;
+    const vContainer = content.querySelector('#ky-vc-container');
+    const clipper = content.querySelector('#ky-vc-clipper');
+    const vA = vContainer.getElementsByTagName('video')[0];
+    const vB = clipper.getElementsByTagName('video')[0];
+    vA.load(); vB.load();
+}
+
+function closeCompareDialog(){
+    if(vcDialog && document.body.contains(vcDialog)){
+        document.body.removeChild(vcDialog);
+        vcDialog=null;
+    }
+}
+
+function openImageCompareDialog(a, b){
+    ensureVCStyle();
+    closeCompareDialog();
+    vcDialog = document.createElement("div");
+    vcDialog.className = "ky-vc-overlay";
+    const content = document.createElement("div");
+    content.className = "ky-vc-content";
+    content.innerHTML = `
+        <div class="ky-vc-header">
+            <button class="ky-vc-btn" id="ky-vc-close">✖ Close</button>
+            <div class="ky-vc-controls">
+                <button class="ky-vc-btn primary" id="ky-vc-reload">🔄 Reload</button>
+                <button class="ky-vc-btn" id="ky-vc-fs">⛶ FullScreen</button>
+                <input class="ky-vc-input" id="ky-vc-a" placeholder="Image A URL">
+                <input class="ky-vc-input" id="ky-vc-b" placeholder="Image B URL">
+            </div>
+        </div>
+        <div class="ky-vc-body">
+            <div id="ky-vc-container">
+                <img id="ky-ic-a">
+                <div id="ky-vc-clipper">
+                    <img id="ky-ic-b" style="z-index:3;">
+                </div>
+            </div>
+        </div>
+    `;
+    vcDialog.appendChild(content);
+    document.body.appendChild(vcDialog);
+    const inpA = content.querySelector('#ky-vc-a');
+    const inpB = content.querySelector('#ky-vc-b');
+    const vContainer = content.querySelector('#ky-vc-container');
+    const clipper = content.querySelector('#ky-vc-clipper');
+    const imgA = content.querySelector('#ky-ic-a');
+    const imgB = content.querySelector('#ky-ic-b');
+    function toStr(x){return (Array.isArray(x)?x.join(''):x||"").toString();}
+    inpA.value = toStr(a);
+    inpB.value = toStr(b);
+    imgA.src = toStr(a);
+    imgB.src = toStr(b);
+    function track(e){const rect=vContainer.getBoundingClientRect();const pos=(e.pageX-rect.left)/vContainer.offsetWidth*100;if(pos<=100){clipper.style.width=pos+"%";imgB.style.zIndex=3;}}
+    function layout(){
+        const cw = vContainer.clientWidth; const ch = vContainer.clientHeight;
+        const aw = imgA.naturalWidth||1024; const ah = imgA.naturalHeight||768;
+        const ar = aw/ah; let tw, th;
+        if (cw/ch > ar) { th = ch; tw = Math.round(ch*ar); } else { tw = cw; th = Math.round(cw/ar); }
+        const left = Math.round((cw - tw)/2); const top = Math.round((ch - th)/2);
+        Object.assign(imgA.style,{width:tw+"px",height:th+"px",left:left+"px",top:top+"px"});
+        Object.assign(imgB.style,{width:tw+"px",height:th+"px",left:left+"px",top:top+"px"});
+    }
+    imgA.addEventListener('load', layout);
+    imgB.addEventListener('load', layout);
+    window.addEventListener('resize', layout);
+    vContainer.addEventListener('mousemove',track,false);
+    vContainer.addEventListener('touchstart',track,false);
+    vContainer.addEventListener('touchmove',track,false);
+    content.querySelector('#ky-vc-reload').addEventListener('click',()=>{imgA.src=inpA.value;imgB.src=inpB.value;});
+    const closeBtn=content.querySelector('#ky-vc-close');
+    const fsBtn=content.querySelector('#ky-vc-fs');
+    function close(){closeCompareDialog();}
+    closeBtn.addEventListener('click',close);
+    vcDialog.addEventListener('click',(e)=>{if(e.target===vcDialog) close();});
+    fsBtn.addEventListener('click',()=>{
+        const el = content;
+        if (!document.fullscreenElement) { el.requestFullscreen?.(); el.classList.add('ky-vc-fullscreen'); }
+        else { document.exitFullscreen?.(); el.classList.remove('ky-vc-fullscreen'); }
+    });
+    document.addEventListener('fullscreenchange', ()=>{
+        const isFs = document.fullscreenElement === content;
+        content.classList.toggle('ky-vc-fullscreen', isFs);
+        layout();
+    });
+    vcDialog.tabIndex=-1;vcDialog.addEventListener('keydown',(e)=>{
+        if(e.key==='Escape'){
+            e.preventDefault();
+            if(document.fullscreenElement){ document.exitFullscreen?.(); return; }
+            close();
+        } else if (e.key.toLowerCase()==='f') {
+            e.preventDefault();
+            if (!document.fullscreenElement) { content.requestFullscreen?.(); content.classList.add('ky-vc-fullscreen'); }
+            else { document.exitFullscreen?.(); content.classList.remove('ky-vc-fullscreen'); }
+        }
+    });
+    vcDialog.focus();
+    layout();
+}
+
+function updateImageCompareDialog(a,b){
+    if(!vcDialog) return openImageCompareDialog(a,b);
+    const content = vcDialog.querySelector('.ky-vc-content');
+    const inpA = content.querySelector('#ky-vc-a');
+    const inpB = content.querySelector('#ky-vc-b');
+    const imgA = content.querySelector('#ky-ic-a');
+    const imgB = content.querySelector('#ky-ic-b');
+    function toStr(x){return (Array.isArray(x)?x.join(''):x||"").toString();}
+    const sa = toStr(a); const sb = toStr(b);
+    inpA.value = sa; inpB.value = sb;
+    imgA.src = sa; imgB.src = sb;
 }

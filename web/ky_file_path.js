@@ -64,7 +64,7 @@ style.textContent = `
         background: var(--tr-even-bg-color);
     }
     .ky-file-item.selected {
-        background: var(--p-700); 
+        background: var(--p-500);
         color: white;
     }
     .ky-item-icon {
@@ -434,6 +434,18 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
     let allFiles = []; // 存储所有文件，用于过滤
     let initialFilePath = filePathToPreview; // 存储初始文件路径，用于预览
 
+    function finalizeSelection(finalPath) {
+        if (finalPath === "My Computer") {
+            return;
+        }
+        if (dirWidget) {
+            suppressPathHandling = true;
+            dirWidget.value = finalPath;
+        }
+        closeDialog();
+        setTimeout(() => { suppressPathHandling = false; }, 0);
+    }
+
     async function fetchPath(path) {
         try {
             const response = await api.fetchApi("/ky_utils/browse", {
@@ -467,17 +479,13 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
     
     // 选中文件并预览
     function selectFileAndPreview(file) {
-        // 查找对应的DOM元素
         const fileItems = document.querySelectorAll(".ky-file-item");
         for (const item of fileItems) {
-            // 检查是否包含文件名，并且不是目录
-            if (item.textContent.includes(file.name) && !item.textContent.includes("📁") && !item.textContent.includes("💾")) {
-                // 直接更新选中状态和预览，而不是触发点击事件
+            if (item.dataset && item.dataset.path === file.path) {
                 document.querySelectorAll(".ky-file-item").forEach(i => i.classList.remove("selected"));
                 item.classList.add("selected");
                 selectedItemPath = file.path;
                 pathInput.value = file.path;
-                // 清除初始文件路径，因为已经选中了文件
                 initialFilePath = null;
                 updatePreview(file);
                 break;
@@ -525,6 +533,7 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
             else if (file.type === "file") icon = getFileIcon(file.name); // 根据文件扩展名获取图标
             
             el.innerHTML = `<span class="ky-item-icon">${icon}</span> ${file.name}`;
+            el.dataset.path = file.path;
             
             el.onclick = () => {
                 // 如果是文件夹或驱动器，点击进入
@@ -547,6 +556,11 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
                     updatePreview(file);
                 }
             };
+            if (file.type === "file") {
+                el.ondblclick = () => {
+                    finalizeSelection(file.path);
+                };
+            }
             
             fileListEl.appendChild(el);
         });
@@ -564,26 +578,12 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
     };
 
     selectBtn.onclick = () => {
-        // 如果有初始文件路径，优先选择它
         const finalPath = initialFilePath || selectedItemPath || currentPath;
-        // 过滤掉 "My Computer" 这种虚拟路径
         if (finalPath === "My Computer") {
             alert("Please select a valid drive or folder.");
             return;
         }
-        
-        // 如果有dirWidget，直接更新其值
-        if (dirWidget) {
-            suppressPathHandling = true;
-            dirWidget.value = finalPath;
-        }
-        
-        // 关闭对话框
-        closeDialog();
-        
-        // 不调用onSelect回调函数，避免可能的副作用
-        // 我们已经直接更新了dirWidget.value，这应该足够了
-        setTimeout(() => { suppressPathHandling = false; }, 0);
+        finalizeSelection(finalPath);
     };
     
     // 关闭对话框的函数
