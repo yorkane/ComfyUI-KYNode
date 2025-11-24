@@ -47,7 +47,6 @@ style.textContent = `
         border: 1px solid var(--border-color);
     }
     .ky-file-list {
-        flex-grow: 1;
         overflow-y: auto;
         padding: 10px;
         display: flex;
@@ -99,6 +98,47 @@ style.textContent = `
     .ky-btn:disabled {
         opacity: 0.5;
         cursor: not-allowed;
+    }
+    .ky-browser-body {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        border-top: 1px solid var(--border-color);
+    }
+    .ky-file-list {
+        flex: 1;
+        border-right: 1px solid var(--border-color);
+    }
+    .ky-preview {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        padding: 10px;
+        gap: 10px;
+    }
+    .ky-preview-title {
+        font-size: 12px;
+        color: var(--fg-color);
+    }
+    .ky-preview-content {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: auto;
+        background: var(--tr-even-bg-color);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+    }
+    .ky-preview-content img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+    }
+    .ky-preview-meta {
+        font-size: 12px;
+        color: var(--fg-color);
+        opacity: 0.8;
     }
 `;
 document.head.appendChild(style);
@@ -202,18 +242,53 @@ function shouldShowFile(file, filterType) {
 app.registerExtension({
     name: "KY.PathSelector",
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
-        if (nodeType.comfyClass === "KY_GetPath") {
+        if (nodeType.comfyClass === "KY_GetFromPath") {
             const onNodeCreated = nodeType.prototype.onNodeCreated;
             nodeType.prototype.onNodeCreated = function () {
                 const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
                 
                 const dirWidget = this.widgets.find((w) => w.name === "path");
 
-                this.addWidget("button", "Open File Browser", null, (widget, graphCanvas, node, pos, event) => {
-                    showFileBrowser(dirWidget.value, (selectedPath) => {
-                        dirWidget.value = selectedPath;
-                    });
+                this.addWidget("button", "📁 Open File Browser", null, async (widget, graphCanvas, node, pos, event) => {
+                    const entered = (dirWidget?.value || "").trim().replace(/"/g, "");
+                    if (!entered) {
+                        showFileBrowser("", (selectedPath) => { dirWidget.value = selectedPath; }, null, dirWidget);
+                        return;
+                    }
+                    try {
+                        const resp = await api.fetchApi("/ky_utils/check_path", { method: "POST", body: JSON.stringify({ path: entered }) });
+                        const data = await resp.json();
+                        if (data.type === "file") {
+                            const parentDir = entered.substring(0, entered.lastIndexOf('\\')) || entered.substring(0, entered.lastIndexOf('/')) || entered;
+                            showFileBrowser(parentDir, (selectedPath) => { dirWidget.value = selectedPath; }, entered, dirWidget);
+                        } else if (data.type === "directory") {
+                            showFileBrowser(entered, (selectedPath) => { dirWidget.value = selectedPath; }, null, dirWidget);
+                        } else {
+                            showFileBrowser("", (selectedPath) => { dirWidget.value = selectedPath; }, null, dirWidget);
+                        }
+                    } catch (e) {
+                        showFileBrowser(entered, (selectedPath) => { dirWidget.value = selectedPath; }, null, dirWidget);
+                    }
                 });
+
+                // 添加路径变化监听，当路径输入框内容变化时自动处理
+                const originalCallback = dirWidget.callback;
+                let isInitialized = false;
+                
+                dirWidget.callback = function(value, ...args) {
+                    if (originalCallback) {
+                        originalCallback.call(this, value, ...args);
+                    }
+                    if (suppressPathHandling) {
+                        suppressPathHandling = false;
+                        isInitialized = true;
+                        return;
+                    }
+                    if (isInitialized && value && value.trim()) {
+                        handlePathInput(value, dirWidget);
+                    }
+                    isInitialized = true;
+                };
 
                 return r;
             };
@@ -221,17 +296,82 @@ app.registerExtension({
     },
 });
 
-function showFileBrowser(initialPath, onSelect) {
+// 处理路径输入的函数
+async function handlePathInput(path, dirWidget) {
+    try {
+        // 规范化路径
+        const normalizedPath = path.trim().replace(/"/g, '');
+        
+        // 检查路径是否存在
+        const response = await api.fetchApi("/ky_utils/check_path", {
+            method: "POST",
+            body: JSON.stringify({ path: normalizedPath }),
+        });
+        
+        const data = await response.json();
+        
+        if (data.error) {
+            console.error("Path check error:", data.error);
+            return;
+        }
+        
+        // 如果是文件，打开文件浏览器并预览文件
+        if (data.type === "file") {
+            // 获取文件的父目录
+            const parentDir = normalizedPath.substring(0, normalizedPath.lastIndexOf('\\')) || 
+                             normalizedPath.substring(0, normalizedPath.lastIndexOf('/')) || 
+                             normalizedPath;
+            
+            // 打开文件浏览器，显示父目录内容，并预览该文件
+            showFileBrowser(parentDir, (selectedPath) => {
+                // 更新路径输入框的值
+                if (dirWidget) {
+                    dirWidget.value = selectedPath;
+                    // 不触发widget的回调，避免重新打开文件浏览器
+                    // 用户已经通过文件浏览器选择了路径，不需要再次处理
+                }
+            }, normalizedPath, dirWidget); // 传递文件路径用于预览和dirWidget
+        } 
+        // 如果是目录，打开文件浏览器并显示目录内容
+        else if (data.type === "directory") {
+            showFileBrowser(normalizedPath, (selectedPath) => {
+                // 更新路径输入框的值
+                if (dirWidget) {
+                    dirWidget.value = selectedPath;
+                    // 不触发widget的回调，避免重新打开文件浏览器
+                    // 用户已经通过文件浏览器选择了路径，不需要再次处理
+                }
+            }, null, dirWidget); // 传递dirWidget
+        }
+    } catch (error) {
+        console.error("Error handling path input:", error);
+    }
+}
+
+// 全局变量，跟踪当前打开的对话框
+let currentDialog = null;
+let suppressPathHandling = false;
+
+function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWidget = null) {
+    // 如果已有对话框打开，先关闭它
+    if (currentDialog && document.body.contains(currentDialog)) {
+        document.body.removeChild(currentDialog);
+        currentDialog = null;
+    }
+    
     const dialog = document.createElement("div");
     dialog.style.cssText = `
         position: fixed; top: 0; left: 0; width: 100%; height: 100%;
         background: rgba(0,0,0,0.8); z-index: 10000;
         display: flex; justify-content: center; align-items: center;
     `;
+    
+    // 保存当前对话框引用
+    currentDialog = dialog;
 
     const content = document.createElement("div");
     content.style.cssText = `
-        width: 600px; height: 500px;
+        width: 80vw; height: 80vh;
         background: var(--comfy-menu-bg);
         border-radius: 8px; border: 1px solid var(--border-color);
         display: flex; flex-direction: column; overflow: hidden;
@@ -247,23 +387,30 @@ function showFileBrowser(initialPath, onSelect) {
                 <div class="ky-filter-container">
                     <span class="ky-filter-label">Filter:</span>
                     <select class="ky-filter-select" id="ky-filter-select">
-                        <option value="all">All Files</option>
-                        <option value="image">Images</option>
-                        <option value="video">Videos</option>
-                        <option value="audio">Audio</option>
-                        <option value="document">Documents</option>
-                        <option value="code">Code</option>
-                        <option value="archive">Archives</option>
-                        <option value="text">Text</option>
-                        <option value="folder">Folders Only</option>
+                        <option value="all">📄 All Files</option>
+                        <option value="image">🖼️ Images</option>
+                        <option value="video">🎬 Videos</option>
+                        <option value="audio">🎵 Audio</option>
+                        <option value="document">📋 Documents</option>
+                        <option value="code">💻 Code</option>
+                        <option value="archive">📦 Archives</option>
+                        <option value="text">📝 Text</option>
+                        <option value="folder">📁 Folders Only</option>
                     </select>
                 </div>
                 <input type="text" class="ky-current-path" id="ky-path-input" readonly />
             </div>
-            <div class="ky-file-list" id="ky-file-list"></div>
+            <div class="ky-browser-body">
+                <div class="ky-file-list" id="ky-file-list"></div>
+                <div class="ky-preview" id="ky-preview">
+                    <div class="ky-preview-title">Preview</div>
+                    <div class="ky-preview-content" id="ky-preview-content"></div>
+                    <div class="ky-preview-meta" id="ky-preview-meta"></div>
+                </div>
+            </div>
             <div class="ky-browser-footer">
-                <button class="ky-btn" id="ky-cancel-btn">Cancel</button>
-                <button class="ky-btn primary" id="ky-select-btn">Select Current Path</button>
+                <button class="ky-btn" id="ky-cancel-btn">❌ Cancel</button>
+                <button class="ky-btn primary" id="ky-select-btn">✅ Select</button>
             </div>
         </div>
     `;
@@ -276,12 +423,16 @@ function showFileBrowser(initialPath, onSelect) {
     const cancelBtn = content.querySelector("#ky-cancel-btn");
     const selectBtn = content.querySelector("#ky-select-btn");
     const filterSelect = content.querySelector("#ky-filter-select");
+    const previewEl = content.querySelector("#ky-preview");
+    const previewContentEl = content.querySelector("#ky-preview-content");
+    const previewMetaEl = content.querySelector("#ky-preview-meta");
 
     let currentPath = initialPath || "";
     let parentPath = ""; // 由后端 API 提供
     let selectedItemPath = null;
     let currentFilter = "all"; // 当前过滤类型
     let allFiles = []; // 存储所有文件，用于过滤
+    let initialFilePath = filePathToPreview; // 存储初始文件路径，用于预览
 
     async function fetchPath(path) {
         try {
@@ -297,9 +448,40 @@ function showFileBrowser(initialPath, onSelect) {
             }
 
             render(data);
+            
+            // 如果有初始文件路径，在渲染完成后预览该文件
+            if (initialFilePath) {
+                // 查找文件列表中的文件
+                const fileItem = allFiles.find(file => file.path === initialFilePath);
+                if (fileItem) {
+                    // 选中该文件并预览
+                    selectFileAndPreview(fileItem);
+                }
+                initialFilePath = null; // 清除初始文件路径
+            }
         } catch (e) {
             console.error(e);
             alert("Failed to browse path.");
+        }
+    }
+    
+    // 选中文件并预览
+    function selectFileAndPreview(file) {
+        // 查找对应的DOM元素
+        const fileItems = document.querySelectorAll(".ky-file-item");
+        for (const item of fileItems) {
+            // 检查是否包含文件名，并且不是目录
+            if (item.textContent.includes(file.name) && !item.textContent.includes("📁") && !item.textContent.includes("💾")) {
+                // 直接更新选中状态和预览，而不是触发点击事件
+                document.querySelectorAll(".ky-file-item").forEach(i => i.classList.remove("selected"));
+                item.classList.add("selected");
+                selectedItemPath = file.path;
+                pathInput.value = file.path;
+                // 清除初始文件路径，因为已经选中了文件
+                initialFilePath = null;
+                updatePreview(file);
+                break;
+            }
         }
     }
 
@@ -312,6 +494,7 @@ function showFileBrowser(initialPath, onSelect) {
         pathInput.value = currentPath;
         fileListEl.innerHTML = "";
         selectedItemPath = null;
+        clearPreview();
         
         // Up 按钮状态：如果没有父级（且不是特殊的 ROOT_DRIVES 模式），则禁用
         upBtn.disabled = !parentPath;
@@ -326,6 +509,7 @@ function showFileBrowser(initialPath, onSelect) {
     function applyFilter() {
         fileListEl.innerHTML = "";
         selectedItemPath = null;
+        clearPreview();
         
         // 根据当前过滤条件筛选文件
         const filteredFiles = allFiles.filter(file => shouldShowFile(file, currentFilter));
@@ -358,6 +542,9 @@ function showFileBrowser(initialPath, onSelect) {
                     el.classList.add("selected");
                     selectedItemPath = file.path;
                     pathInput.value = file.path;
+                    // 清除初始文件路径，因为用户已经手动选择了文件
+                    initialFilePath = null;
+                    updatePreview(file);
                 }
             };
             
@@ -373,19 +560,39 @@ function showFileBrowser(initialPath, onSelect) {
     };
 
     cancelBtn.onclick = () => {
-        document.body.removeChild(dialog);
+        closeDialog();
     };
 
     selectBtn.onclick = () => {
-        const finalPath = selectedItemPath || currentPath;
+        // 如果有初始文件路径，优先选择它
+        const finalPath = initialFilePath || selectedItemPath || currentPath;
         // 过滤掉 "My Computer" 这种虚拟路径
         if (finalPath === "My Computer") {
             alert("Please select a valid drive or folder.");
             return;
         }
-        onSelect(finalPath);
-        document.body.removeChild(dialog);
+        
+        // 如果有dirWidget，直接更新其值
+        if (dirWidget) {
+            suppressPathHandling = true;
+            dirWidget.value = finalPath;
+        }
+        
+        // 关闭对话框
+        closeDialog();
+        
+        // 不调用onSelect回调函数，避免可能的副作用
+        // 我们已经直接更新了dirWidget.value，这应该足够了
+        setTimeout(() => { suppressPathHandling = false; }, 0);
     };
+    
+    // 关闭对话框的函数
+    function closeDialog() {
+        if (currentDialog && document.body.contains(currentDialog)) {
+            document.body.removeChild(currentDialog);
+            currentDialog = null;
+        }
+    }
 
     // 过滤下拉框事件处理
     filterSelect.onchange = () => {
@@ -393,6 +600,92 @@ function showFileBrowser(initialPath, onSelect) {
         applyFilter();
     };
 
+    // 添加键盘事件监听器，只在对话框打开时有效
+    const keyHandler = (e) => {
+        // 确保事件只在对话框打开时处理
+        if (!currentDialog || !document.body.contains(currentDialog)) {
+            return;
+        }
+        
+        if (e.key === "Escape") {
+            // Esc键等同于点击取消按钮
+            e.preventDefault();
+            e.stopPropagation();
+            cancelBtn.onclick();
+        } else if (e.key === "Enter") {
+            // Enter键等同于点击选择按钮
+            e.preventDefault();
+            e.stopPropagation();
+            selectBtn.onclick();
+        }
+    };
+    
+    // 添加键盘事件监听器到对话框元素，而不是document
+    dialog.addEventListener("keydown", keyHandler);
+    
+    // 确保对话框可以获得焦点
+    dialog.tabIndex = -1;
+    dialog.focus();
+
     // 初始化加载
     fetchPath(currentPath);
+}
+
+function clearPreview() {
+    const previewContentEl = document.querySelector("#ky-preview-content");
+    const previewMetaEl = document.querySelector("#ky-preview-meta");
+    if (previewContentEl) previewContentEl.innerHTML = "";
+    if (previewMetaEl) previewMetaEl.textContent = "";
+}
+
+async function updatePreview(file) {
+    const previewContentEl = document.querySelector("#ky-preview-content");
+    const previewMetaEl = document.querySelector("#ky-preview-meta");
+    if (!previewContentEl || !previewMetaEl) return;
+    clearPreview();
+    if (!file || file.type !== "file") {
+        previewMetaEl.textContent = "Select a file to preview";
+        return;
+    }
+    try {
+        const response = await api.fetchApi("/ky_utils/file_preview", {
+            method: "POST",
+            body: JSON.stringify({ path: file.path })
+        });
+        const info = await response.json();
+        if (info.error) {
+            previewMetaEl.textContent = "Preview unavailable";
+            return;
+        }
+        const sizeStr = typeof info.size === "number" ? `${info.size} bytes` : "";
+        previewMetaEl.textContent = `${file.name}${sizeStr ? ` • ${sizeStr}` : ""}`;
+        if (info.type === "image" && info.preview_url) {
+            const img = document.createElement("img");
+            img.src = info.preview_url;
+            previewContentEl.appendChild(img);
+        } else if (info.type === "text" && info.snippet) {
+            const pre = document.createElement("pre");
+            pre.style.whiteSpace = "pre-wrap";
+            pre.style.wordBreak = "break-word";
+            pre.textContent = info.snippet;
+            previewContentEl.appendChild(pre);
+        } else if (info.type === "video" && info.preview_url) {
+            const video = document.createElement("video");
+            video.controls = true;
+            video.style.width = "100%";
+            video.style.height = "100%";
+            video.src = info.preview_url;
+            previewContentEl.appendChild(video);
+        } else if (info.type === "audio" && info.preview_url) {
+            const audio = document.createElement("audio");
+            audio.controls = true;
+            audio.style.width = "100%";
+            audio.src = info.preview_url;
+            previewContentEl.appendChild(audio);
+        } else {
+            previewContentEl.textContent = "No preview available";
+        }
+    } catch (e) {
+        previewContentEl.textContent = "Preview failed";
+    }
 }

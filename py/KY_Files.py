@@ -112,7 +112,7 @@ class FileSequenceAnalyzer:
 
 
 
-class KY_GetPath:
+class KY_GetFromPath:
     def __init__(self):
         pass
 
@@ -123,60 +123,103 @@ class KY_GetPath:
                 "path": ("STRING", {"default": "", "multiline": True}),
             },
             "optional": {
-                "prefix": ("STRING", {"default": "", "multiline": False, "placeholder": "Prefix (e.g. C:/Data/)"}),
-                "suffix": ("STRING", {"default": "", "multiline": False, "placeholder": "Suffix (e.g. /output)"}),
-                "create_missing": ("BOOLEAN", {"default": False, "label_on": "True", "label_off": "False", "tooltip": "Force create the directory if it does not exist."}),
+                "create_missing_folder": ("BOOLEAN", {"default": False, "label_on": "True", "label_off": "False", "tooltip": "Create the directory only if it does not exist AND path ends with '/' or '\\'."}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
             },
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING")
-    RETURN_NAMES = ("full_path", "current_dir", "parent_dir", "filename")
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "IMAGE", "STRING")
+    RETURN_NAMES = ("full_path", "current_dir", "parent_dir", "filename", "image", "text")
     FUNCTION = "process_path"
     CATEGORY = "KY_Nodes/Path"
 
-    def process_path(self, path, prefix="", suffix="", create_missing=False, unique_id=None):
+    def process_path(self, path, create_missing_folder=False, unique_id=None):
         # 1. 基础路径处理
         raw_path = path
-        
-        # 2. 拼接前缀后缀 (使用 os.path.join 自动适配系统分隔符)
-        if prefix:
-            raw_path = os.path.join(prefix, raw_path)
-        if suffix:
-            raw_path = os.path.join(raw_path, suffix)
 
-        # 3. 规范化路径 (处理混合斜杠、.. 等)
+        # 2. 规范化路径 (处理混合斜杠、.. 等)
         # os.path.normpath 会根据当前操作系统将 / 转换为 \ (Windows) 或保持 / (Linux)
         full_path = os.path.normpath(raw_path)
         
-        # 4. 获取绝对路径
+        # 3. 获取绝对路径
         abs_path = os.path.abspath(full_path)
 
-        # 5. 强制创建目录逻辑
-        if create_missing:
+        # 4. 强制创建目录逻辑
+        if create_missing_folder:
             try:
                 if not os.path.exists(abs_path):
-                    # 递归创建目录
-                    os.makedirs(abs_path, exist_ok=True)
-                    print(f"[KY_GetPath] Created missing directory: {abs_path}")
+                    # 只有当路径以 '/' 或 '\' 结尾时才创建目录
+                    if raw_path.endswith('/') or raw_path.endswith('\\') or raw_path.endswith(os.sep):
+                        # 递归创建目录
+                        os.makedirs(abs_path, exist_ok=True)
+                        print(f"[KY_GetFromPath] Created missing directory: {abs_path}")
+                    else:
+                        print(f"[KY_GetFromPath] Path does not end with '/' or '\\', not creating directory: {abs_path}")
             except Exception as e:
-                print(f"[KY_GetPath] Failed to create directory {abs_path}. Error: {e}")
+                print(f"[KY_GetFromPath] Failed to create directory {abs_path}. Error: {e}")
 
-        # 6. 提取信息
+        # 5. 提取信息
         # 注意：如果刚刚执行了创建目录，os.path.isdir(abs_path) 现在将返回 True
         if os.path.isdir(abs_path):
             current_dir = abs_path
             filename = "" 
             parent_dir = os.path.dirname(abs_path)
         else:
-            # 如果路径存在但不是目录（是文件），或者路径仍然不存在（create_missing=False 或 创建失败）
+            # 如果路径存在但不是目录（是文件），或者路径仍然不存在（create_missing_folder=False 或 创建失败）
             current_dir = os.path.dirname(abs_path)
             filename = os.path.basename(abs_path)
             parent_dir = os.path.dirname(current_dir)
 
-        return (abs_path, current_dir, parent_dir, filename)
+        # 6. 初始化返回对象
+        image_tensor = None
+        text_content = ""
+
+        # 7. 检测文件类型并加载相应对象
+        if os.path.isfile(abs_path):
+            file_ext = Path(abs_path).suffix.lower()
+            
+            # 图像文件类型
+            image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp', '.ico', '.tiff', '.tif'}
+            # 文本文件类型
+            text_extensions = {'.txt', '.md', '.log', '.csv', '.tsv', '.json', '.xml'}
+            
+            try:
+                if file_ext in image_extensions:
+                    # 加载图像
+                    from PIL import Image, ImageOps
+                    img = Image.open(abs_path)
+                    img = ImageOps.exif_transpose(img)
+                    
+                    if img.mode == 'I':
+                        img = img.point(lambda i: i * (1 / 255))
+                    img = img.convert('RGB')
+                    
+                    # 转换为ComfyUI的tensor格式
+                    import numpy as np
+                    image_np = np.array(img).astype(np.float32) / 255.0
+                    image_tensor = torch.from_numpy(image_np)[None,]
+                    
+                elif file_ext in text_extensions:
+                    # 读取文本内容
+                    try:
+                        with open(abs_path, 'r', encoding='utf-8') as f:
+                            text_content = f.read()
+                    except UnicodeDecodeError:
+                        # 尝试其他编码
+                        try:
+                            with open(abs_path, 'r', encoding='gbk') as f:
+                                text_content = f.read()
+                        except:
+                            text_content = f"无法读取文件内容: {abs_path}"
+                    except Exception as e:
+                        text_content = f"读取文件时出错: {str(e)}"
+                        
+            except Exception as e:
+                print(f"[KY_GetFromPath] Error loading file {abs_path}: {e}")
+
+        return (abs_path, current_dir, parent_dir, filename, image_tensor, text_content)
 
 # --- 工具函数 ---
 
@@ -199,6 +242,30 @@ def get_available_drives():
 
 def register_routes():
     try:
+        @PromptServer.instance.routes.post("/ky_utils/check_path")
+        async def check_path_type(request):
+            """检查路径是文件还是目录"""
+            data = await request.json()
+            path = data.get("path", "")
+            
+            if not path:
+                return web.json_response({"error": "No path provided"})
+            
+            # 规范化路径
+            path = os.path.normpath(path.strip('"'))
+            
+            # 检查路径是否存在
+            if not os.path.exists(path):
+                return web.json_response({"error": "Path does not exist", "type": "none"})
+            
+            # 检查是文件还是目录
+            if os.path.isfile(path):
+                return web.json_response({"type": "file", "path": path})
+            elif os.path.isdir(path):
+                return web.json_response({"type": "directory", "path": path})
+            else:
+                return web.json_response({"type": "unknown", "path": path})
+        
         @PromptServer.instance.routes.post("/ky_utils/browse")
         async def browse_filesystem(request):
             data = await request.json()
@@ -260,16 +327,33 @@ def register_routes():
                 if parent_path:
                      folders.append({"name": "..", "type": "dir", "path": parent_path})
 
+                # 定义需要过滤的文件扩展名和目录名
+                filtered_extensions = {'.py', '.pyw', '.pyc', '.pyo', '.pyd',  # Python相关
+                                      '.sh', '.bash', '.zsh', '.fish',         # Shell脚本
+                                      '.bat', '.cmd', '.ps1', '.psm1', '.psd1', # Windows批处理和PowerShell
+                                      '.ini', '.cfg', '.conf', '.config',       # 配置文件
+                                      '.yaml', '.yml', '.toml'}                 # 其他配置文件格式
+                
+                filtered_dir_names = {'__pycache__', '.git', '.svn', '.hg',      # 版本控制和Python缓存
+                                     'node_modules', '.vscode', '.idea'}        # 开发工具目录
+
                 for item in os.listdir(path):
-                    if item.startswith('.'): continue 
+                    if item.startswith('.'): continue
                     
                     full_item_path = os.path.join(path, item)
                     
                     # 检查类型和权限
                     try:
                         if os.path.isdir(full_item_path):
+                            # 过滤特定目录名
+                            if item in filtered_dir_names:
+                                continue
                             folders.append({"name": item, "type": "dir", "path": full_item_path})
                         else:
+                            # 获取文件扩展名并检查是否需要过滤
+                            _, ext = os.path.splitext(item.lower())
+                            if ext in filtered_extensions:
+                                continue
                             files.append({"name": item, "type": "file", "path": full_item_path})
                     except OSError:
                         # 忽略无权访问的文件/链接
@@ -292,12 +376,183 @@ def register_routes():
                 return web.json_response({"error": str(e), "path": path, "files": []})
                 
     except Exception as e:
-        print(f"KY_GetPath: Error registering routes: {e}")
+        print(f"KY_GetFromPath: Error registering routes: {e}")
+
+    try:
+        @PromptServer.instance.routes.post("/ky_utils/file_preview")
+        async def file_preview(request):
+            data = await request.json()
+            path = data.get("path", "")
+            if not path or not os.path.exists(path) or not os.path.isfile(path):
+                return web.json_response({"error": "Invalid file"})
+            
+            # 获取文件扩展名并检查是否为过滤类型
+            ext = Path(path).suffix.lower()
+            filtered_extensions = {'.py', '.pyw', '.pyc', '.pyo', '.pyd',  # Python相关
+                                  '.sh', '.bash', '.zsh', '.fish',         # Shell脚本
+                                  '.bat', '.cmd', '.ps1', '.psm1', '.psd1', # Windows批处理和PowerShell
+                                  '.ini', '.cfg', '.conf', '.config',       # 配置文件
+                                  '.yaml', '.yml', '.toml'}                 # 其他配置文件格式
+            
+            # 如果是过滤的文件类型，返回错误
+            if ext in filtered_extensions:
+                return web.json_response({"error": "File type not supported for preview"})
+            
+            ext = ext.lstrip(".")
+            size = 0
+            try:
+                size = os.path.getsize(path)
+            except Exception:
+                pass
+            mtime = 0
+            try:
+                mtime = os.path.getmtime(path)
+            except Exception:
+                pass
+            image_ext = {"jpg","jpeg","png","gif","bmp","svg","webp","ico","tiff","tif"}
+            text_ext = {"txt","md","rtf","log","csv","tsv","json","xml"}  # 移除了ini, cfg, conf, yaml, yml, toml
+            audio_ext = {"mp3","wav","flac","aac","ogg","wma","m4a","opus"}
+            video_ext = {"mp4","avi","mkv","mov","wmv","flv","webm","m4v","3gp","ogv"}
+            ftype = "unknown"
+            if ext in image_ext:
+                ftype = "image"
+            elif ext in text_ext:
+                ftype = "text"
+            elif ext in audio_ext:
+                ftype = "audio"
+            elif ext in video_ext:
+                ftype = "video"
+            can_preview = False
+            preview_url = None
+            snippet = None
+            if ftype == "image":
+                can_preview = True
+                preview_url = f"/ky_utils/stream?path={path}"
+            elif ftype == "text":
+                can_preview = True
+                try:
+                    with open(path, "rb") as f:
+                        data_bytes = f.read(8192)
+                    snippet = data_bytes.decode("utf-8", errors="replace")
+                except Exception:
+                    snippet = ""
+            elif ftype in ("audio","video"):
+                can_preview = True
+                preview_url = f"/ky_utils/stream?path={path}"
+            return web.json_response({
+                "type": ftype,
+                "size": size,
+                "modified": mtime,
+                "can_preview": can_preview,
+                "preview_url": preview_url,
+                "snippet": snippet
+            })
+
+        @PromptServer.instance.routes.get("/ky_utils/stream")
+        async def stream_file(request):
+            q = request.rel_url.query
+            path = q.get("path")
+            if not path or not os.path.exists(path) or not os.path.isfile(path):
+                return web.Response(status=404)
+            
+            # 获取文件扩展名并检查是否为过滤类型
+            ext_with_dot = Path(path).suffix.lower()
+            filtered_extensions = {'.py', '.pyw', '.pyc', '.pyo', '.pyd',  # Python相关
+                                  '.sh', '.bash', '.zsh', '.fish',         # Shell脚本
+                                  '.bat', '.cmd', '.ps1', '.psm1', '.psd1', # Windows批处理和PowerShell
+                                  '.ini', '.cfg', '.conf', '.config',       # 配置文件
+                                  '.yaml', '.yml', '.toml'}                 # 其他配置文件格式
+            
+            # 如果是过滤的文件类型，返回404
+            if ext_with_dot in filtered_extensions:
+                return web.Response(status=404)
+            
+            ext = ext_with_dot.lstrip(".")
+            image_ext = {"jpg","jpeg","png","gif","bmp","svg","webp","ico","tiff","tif"}
+            audio_ext = {"mp3","wav","flac","aac","ogg","wma","m4a","opus"}
+            video_ext = {"mp4","avi","mkv","mov","wmv","flv","webm","m4v","3gp","ogv"}
+            mime = "application/octet-stream"
+            mime_map = {
+                "jpg": "image/jpeg",
+                "jpeg": "image/jpeg",
+                "png": "image/png",
+                "gif": "image/gif",
+                "bmp": "image/bmp",
+                "svg": "image/svg+xml",
+                "webp": "image/webp",
+                "ico": "image/x-icon",
+                "tiff": "image/tiff",
+                "tif": "image/tiff",
+                "mp3": "audio/mpeg",
+                "wav": "audio/wav",
+                "flac": "audio/flac",
+                "aac": "audio/aac",
+                "ogg": "audio/ogg",
+                "wma": "audio/x-ms-wma",
+                "m4a": "audio/mp4",
+                "opus": "audio/opus",
+                "mp4": "video/mp4",
+                "avi": "video/x-msvideo",
+                "mkv": "video/x-matroska",
+                "mov": "video/quicktime",
+                "wmv": "video/x-ms-wmv",
+                "flv": "video/x-flv",
+                "webm": "video/webm",
+                "m4v": "video/x-m4v",
+                "3gp": "video/3gpp",
+                "ogv": "video/ogg",
+            }
+            if ext in mime_map:
+                mime = mime_map[ext]
+            try:
+                if ext in image_ext:
+                    with open(path, "rb") as f:
+                        content = f.read()
+                    return web.Response(body=content, content_type=mime)
+                elif ext in audio_ext or ext in video_ext:
+                    file_size = os.path.getsize(path)
+                    range_header = request.headers.get("Range")
+                    if range_header:
+                        try:
+                            units, rng = range_header.split("=", 1)
+                            if units != "bytes":
+                                return web.Response(status=416)
+                            start_str, end_str = rng.split("-", 1)
+                            start = int(start_str) if start_str else 0
+                            end = int(end_str) if end_str else file_size - 1
+                            if start >= file_size:
+                                return web.Response(status=416)
+                            if end >= file_size:
+                                end = file_size - 1
+                            length = end - start + 1
+                            with open(path, "rb") as f:
+                                f.seek(start)
+                                data = f.read(length)
+                            headers = {
+                                "Content-Range": f"bytes {start}-{end}/{file_size}",
+                                "Accept-Ranges": "bytes",
+                                "Content-Length": str(len(data)),
+                            }
+                            return web.Response(status=206, body=data, headers=headers, content_type=mime)
+                        except Exception:
+                            return web.Response(status=500)
+                    with open(path, "rb") as f:
+                        content = f.read()
+                    headers = {
+                        "Accept-Ranges": "bytes",
+                        "Content-Length": str(len(content)),
+                    }
+                    return web.Response(body=content, headers=headers, content_type=mime)
+                return web.Response(status=415)
+            except Exception:
+                return web.Response(status=500)
+    except Exception as e:
+        print(f"KY_GetFromPath: Error registering preview routes: {e}")
 
 register_routes()
 
 NODE_CLASS_MAPPINGS = {
-    "KY_GetPath": KY_GetPath,
+    "KY_GetFromPath": KY_GetFromPath,
     "KY_FilePathAnalyzer-": FilePathAnalyzer,
     "KY_FileSequenceAnalyzer": FileSequenceAnalyzer,
 }
@@ -305,5 +560,5 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "KY_FilePathAnalyzer-": "FilePath Analyzer",
     "KY_FileSequenceAnalyzer": "File Sequence Analyzer",
-    "KY_GetPath": "KY File/Folder Path",
+    "KY_GetFromPath": "KY File/Folder Path",
 }
