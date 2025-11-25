@@ -2,6 +2,8 @@ import os
 import subprocess
 import shlex
 import json
+import re
+import sys
 
 # ======================================================================================
 # KY_FFmpeg core configuration and utility functions
@@ -24,9 +26,26 @@ COLORSPACE_MAP = {
 }
 
 COMMON_FPS = [2, 3, 6, 12.0, 15.0, 23.976, 24.0, 25.0, 29.97, 30.0, 50.0, 59.94, 60.0, 120.0]
-QUALITY_VALUE_CHOICES = ["12", "16", "18", "20", "22", "23", "28", "35", "40", "45", "50", "5M", "8M", "10M", "15M", "20M"]
+QUALITY_VALUE_CHOICES = ["12","13","14","15" ,"16","17", "18", "19","20","21","22", "23","24","25", "28", "35", "40", "45", "50", "5M", "8M", "10M", "15M", "20M"]
 ENCODER_CHOICES = ["libx264", "h264_nvenc", "libx265", "hevc_nvenc", "prores_ks", "libvpx-vp9"]
 HW_ACCEL_CHOICES = ["", "-hwaccel cuda -vsync passthrough", "-hwaccel cuda", "-hwaccel vulkan", "-hwaccel dxva2"]
+PIX_FMT_CHOICES = [
+    "yuv420p",
+    "yuv420p10le",
+    "yuv444p",
+    "yuv444p10le",
+    "nv12",
+    "p010le",
+    "rgb24"
+]
+ENCODER_DEFAULT_CONTAINER = {
+    "libx264": "mp4",
+    "h264_nvenc": "mp4",
+    "libx265": "mp4",
+    "hevc_nvenc": "mp4",
+    "prores_ks": "mov",
+    "libvpx-vp9": "webm",
+}
 
 def _get_codec_params(codec_choice, quality_type, quality_value, gpu_accel):
     """Generate encoder and quality parameters based on user choices."""
@@ -81,10 +100,59 @@ def _get_colorspace_flags(colorspace_choice):
         "-colorspace", colorspace_value
     ]
 
+def _detect_image_sequence(input_dir):
+    exts = ["png", "jpg", "jpeg", "webp", "tiff"]
+    if not os.path.isdir(input_dir):
+        return None
+    try:
+        files = os.listdir(input_dir)
+    except Exception:
+        return None
+
+    ext_any = {ext: False for ext in exts}
+    for f in files:
+        fl = f.lower()
+        for ext in exts:
+            if fl.endswith(f".{ext}"):
+                ext_any[ext] = True
+                break
+
+    for ext in exts:
+        prefix_groups = {}
+        for f in files:
+            if not f.lower().endswith(f".{ext}"):
+                continue
+            base = f[:-(len(ext) + 1)]
+            m = re.search(r"(\d+)$", base)
+            if m:
+                prefix = base[:m.start()] 
+                num = m.group(1)
+                prefix_groups.setdefault(prefix, []).append(num)
+
+        if prefix_groups:
+            best_prefix = max(prefix_groups.keys(), key=lambda k: len(prefix_groups[k]))
+            nums = prefix_groups[best_prefix]
+            if nums:
+                widths = [len(n) for n in nums]
+                width = max(widths) if max(widths) > 1 else 0
+                if width > 1:
+                    pattern = os.path.join(input_dir, f"{best_prefix}%0{width}d.{ext}")
+                else:
+                    pattern = os.path.join(input_dir, f"{best_prefix}%d.{ext}")
+                start_number = min(int(n) for n in nums)
+                return pattern, start_number, ext, False
+
+    for ext in exts:
+        if ext_any[ext]:
+            pattern = os.path.join(input_dir, f"*.{ext}")
+            return pattern, None, ext, True
+
+    return None
+
 def _run_KY_FFmpeg(command_list):
     """Execute KY_FFmpeg command and handle errors."""
-    command_str = " ".join(shlex.quote(c) for c in command_list)
-    print(f"[KY_FFmpeg] Running command: {command_str}")
+    command_str = subprocess.list2cmdline(command_list) if os.name == "nt" else " ".join(shlex.quote(c) for c in command_list)
+    print(f"[KY_FFmpeg] Running command: {command_str}", flush=True)
     
     # Use pipes to capture output and Popen to avoid blocking
     process = subprocess.Popen(
@@ -102,10 +170,10 @@ def _run_KY_FFmpeg(command_list):
     
     if process.returncode != 0:
         error_message = f"KY_FFmpeg Error (Code {process.returncode}):\n{stderr}"
-        print(f"ERROR: {error_message}")
+        print(f"ERROR: {error_message}", flush=True)
         raise RuntimeError(error_message)
     
-    print("[KY_FFmpeg] Command executed successfully.")
+    print("[KY_FFmpeg] Command executed successfully.", flush=True)
     # Optionally print partial output, especially progress (stdout) and detailed logs (stderr)
     # print(f"KY_FFmpeg STDOUT:\n{stdout[-500:]}")
     
@@ -129,11 +197,12 @@ class KY_FFmpegVideoToImages:
             },
         }
 
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("output_dir_path",)
+    RETURN_TYPES = ("STRING", "INT", "FLOAT")
+    RETURN_NAMES = ("output_dir_path", "frame_count", "total_size_mb")
     FUNCTION = "execute"
     CATEGORY = "Video/KY_FFmpeg"
     DESCRIPTION = "Converts a video to an image sequence (e.g., for frame editing). High-quality PNG is default."
+    OUTPUT_NODE = True
 
     def execute(self, video_path, output_dir, output_fps, image_format):
         video_path = video_path.strip()
@@ -167,15 +236,32 @@ class KY_FFmpegVideoToImages:
         ]
         
         _run_KY_FFmpeg(command)
+
+        files = []
+        try:
+            for f in os.listdir(output_dir):
+                fl = f.lower()
+                if fl.endswith(f".{image_format.lower()}") and re.match(r"^\d+\.", f):
+                    files.append(f)
+        except Exception:
+            files = []
+        frame_count = len(files)
+        total_size_bytes = 0
+        for f in files:
+            fp = os.path.join(output_dir, f)
+            try:
+                total_size_bytes += os.path.getsize(fp)
+            except Exception:
+                pass
+        total_size_mb = round(total_size_bytes / (1024 * 1024), 3)
         
-        return (output_dir,)
+        return (output_dir, frame_count, total_size_mb)
 
 class KY_FFmpegImagesToVideo:
     """Node 2: Encode an image sequence into a video."""
     
     @classmethod
     def INPUT_TYPES(s):
-        codec_choices = list(CODEC_MAP.keys())
         colorspace_choices = list(COLORSPACE_MAP.keys())
         
         return {
@@ -183,11 +269,16 @@ class KY_FFmpegImagesToVideo:
                 "input_dir": ("STRING", {"default": "C:/path/to/input/frames", "multiline": False}),
                 "output_path": ("STRING", {"default": "C:/path/to/output.mp4", "multiline": False}),
                 "input_fps": (COMMON_FPS, {"default": 30.0}),
-                "codec_choice": (codec_choices, {"default": "H.264 (MP4)"}),
+                "encoder_name": (ENCODER_CHOICES, {"default": "libx264"}),
                 "quality_type": (["CRF (Constant Rate Factor)", "QP (Quantization Parameter)", "Bitrate (k/M)"], {"default": "CRF (Constant Rate Factor)"}),
                 "quality_value": (QUALITY_VALUE_CHOICES, {"default": "18"}),
                 "colorspace_choice": (colorspace_choices, {"default": "BT.709 (HD)"}),
-                "gpu_accel": ("BOOLEAN", {"default": False}),
+                "pix_fmt": (PIX_FMT_CHOICES, {"default": "yuv420p"}),
+            },
+            "optional": {
+                "audio_in_path": ("STRING", {"default": "", "multiline": False}),
+                "audio_codec": (["aac", "copy"], {"default": "aac"}),
+                "audio_shortest": ("BOOLEAN", {"default": True}),
             },
         }
 
@@ -196,8 +287,9 @@ class KY_FFmpegImagesToVideo:
     FUNCTION = "execute"
     CATEGORY = "Video/KY_FFmpeg"
     DESCRIPTION = "Encodes an image sequence into a video file with advanced options."
+    OUTPUT_NODE = True
 
-    def execute(self, input_dir, output_path, input_fps, codec_choice, quality_type, quality_value, colorspace_choice, gpu_accel):
+    def execute(self, input_dir, output_path, input_fps, encoder_name, quality_type, quality_value, colorspace_choice, pix_fmt, audio_in_path="", audio_codec="aac", audio_shortest=True):
         input_dir = input_dir.strip()
         output_path = output_path.strip()
         try:
@@ -205,17 +297,11 @@ class KY_FFmpegImagesToVideo:
         except Exception:
             input_fps = 30.0
 
-        # 1) Find the first frame to determine format
-        # Assume all images share the same format and are named with %08d
-        first_frame_path = None
-        for ext in ["png", "jpg", "jpeg", "webp", "tiff"]:
-            test_path = os.path.join(input_dir, f"00000001.{ext}")
-            if os.path.exists(test_path):
-                first_frame_path = os.path.join(input_dir, f"%08d.{ext}")
-                break
-        
-        if not first_frame_path:
-            raise FileNotFoundError(f"No image files found (e.g., 00000001.png) in: {input_dir}")
+        # 1) Detect sequence pattern automatically (supports 00000.png or 00000001.webp, etc.)
+        seq_info = _detect_image_sequence(input_dir)
+        if not seq_info:
+            raise FileNotFoundError(f"No image sequence found in: {input_dir}")
+        pattern_path, start_number, detected_ext, use_glob = seq_info
             
         # 2) Build encoder and quality parameters
         if quality_type == "Bitrate (k/M)":
@@ -226,10 +312,14 @@ class KY_FFmpegImagesToVideo:
                 int(quality_value)
             except Exception:
                 quality_value = "18" if quality_type == "CRF (Constant Rate Factor)" else "20"
-
-        hw_accel_flags, codec_flags, quality_flags, default_ext = _get_codec_params(
-            codec_choice, quality_type, quality_value, gpu_accel
-        )
+        codec_flags = ["-c:v", encoder_name]
+        if quality_type == "CRF (Constant Rate Factor)":
+            quality_flags = ["-crf", str(quality_value)]
+        elif quality_type == "QP (Quantization Parameter)":
+            quality_flags = ["-qp", str(quality_value)] if "nvenc" in encoder_name else ["-crf", str(quality_value)]
+        else:
+            quality_flags = ["-b:v", str(quality_value)]
+        default_ext = ENCODER_DEFAULT_CONTAINER.get(encoder_name, "mp4")
         colorspace_flags = _get_colorspace_flags(colorspace_choice)
         
         # 3) Construct output path (ensure extension matches container unless explicitly set)
@@ -240,25 +330,39 @@ class KY_FFmpegImagesToVideo:
         # KY_FFmpeg command
         command = [
             "ffmpeg", "-hide_banner",
-            # Hardware acceleration flags (must be set before inputs)
-            *hw_accel_flags,
             # Input settings
-            "-framerate", str(input_fps), 
-            "-i", first_frame_path, 
-            # Video encoding settings (H.264/H.265/ProRes etc.)
-            *codec_flags,
-            # Quality/compression parameters (CRF/QP/Bitrate)
-            *quality_flags,
-            # Color space parameters
-            *colorspace_flags,
-            # Pixel format (yuv420p is widely compatible)
-            "-pix_fmt", "yuv420p",
-            # Multithreading/speed optimization (important for CPU encoders)
-            "-preset", "medium", 
-            # Force overwrite output file
-            "-y", 
-            output_path
+            "-framerate", str(input_fps),
         ]
+
+        if use_glob:
+            command.extend(["-pattern_type", "glob", "-i", pattern_path])
+        else:
+            if start_number is not None:
+                command.extend(["-start_number", str(start_number)])
+            command.extend(["-i", pattern_path])
+
+        audio_in_path = (audio_in_path or "").strip()
+        if audio_in_path:
+            if not os.path.exists(audio_in_path):
+                raise FileNotFoundError(f"Input audio file not found: {audio_in_path}")
+            command.extend(["-i", audio_in_path])
+
+        # Video encoding settings (H.264/H.265/ProRes etc.)
+        command.extend(codec_flags)
+        # Quality/compression parameters (CRF/QP/Bitrate)
+        command.extend(quality_flags)
+        # Color space parameters
+        command.extend(colorspace_flags)
+        if audio_in_path:
+            command.extend(["-map", "0:v:0", "-map", "1:a:0", "-c:a", audio_codec])
+            if audio_shortest:
+                command.append("-shortest")
+        # Pixel format from dropdown
+        command.extend(["-pix_fmt", pix_fmt])
+        # Multithreading/speed optimization (important for CPU encoders)
+        command.extend(["-preset", "medium"]) 
+        # Force overwrite output file
+        command.extend(["-y", output_path])
 
         _run_KY_FFmpeg(command)
         
@@ -283,6 +387,7 @@ class KY_FFmpegAddAudio:
     FUNCTION = "execute"
     CATEGORY = "Video/KY_FFmpeg"
     DESCRIPTION = "Merges a video file and an audio file. Uses 'copy' for video stream for speed."
+    OUTPUT_NODE = True
 
     def execute(self, video_in_path, audio_in_path, output_path, audio_codec):
         video_in_path = video_in_path.strip()
@@ -335,6 +440,7 @@ class KY_FFmpegTrimVideo:
     FUNCTION = "execute"
     CATEGORY = "Video/KY_FFmpeg"
     DESCRIPTION = "Trims a video using start time and duration. Stream Copy is fastest but start time might be slightly off."
+    OUTPUT_NODE = True
 
     def execute(self, video_in_path, output_path, start_time_seconds, duration_seconds, copy_stream):
         video_in_path = video_in_path.strip()
@@ -399,6 +505,7 @@ class KY_FFmpegCustomCmd:
     FUNCTION = "execute"
     CATEGORY = "Video/KY_FFmpeg/Advanced"
     DESCRIPTION = "Executes a custom KY_FFmpeg command. Use {input_1}, {output_file}, {param_1}, etc., in the template."
+    OUTPUT_NODE = True
 
     def execute(self, command_template, input_1, output_file, input_2="", param_1="", param_2="", param_3="", hw_accel_pre_flags=""):
         

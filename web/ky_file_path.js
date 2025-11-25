@@ -30,7 +30,7 @@ style.textContent = `
         color: var(--fg-color);
     }
     .ky-filter-select {
-        background: var(--input-bg);
+        background: #333333;
         color: var(--input-text);
         border: 1px solid var(--border-color);
         border-radius: 4px;
@@ -64,8 +64,12 @@ style.textContent = `
         background: var(--tr-even-bg-color);
     }
     .ky-file-item.selected {
-        background: var(--p-500);
-        color: white;
+        background: var(--p-600, #3b82f6);
+        color: #ffffff;
+        border-left: 3px solid var(--p-800, #1e40af);
+    }
+    .ky-file-item.selected:hover {
+        background: var(--p-600, #3b82f6);
     }
     .ky-item-icon {
         margin-right: 10px;
@@ -106,11 +110,11 @@ style.textContent = `
         border-top: 1px solid var(--border-color);
     }
     .ky-file-list {
-        flex: 1;
+        flex: 0 0 35%;
         border-right: 1px solid var(--border-color);
     }
     .ky-preview {
-        flex: 1;
+        flex: 0 0 65%;
         display: flex;
         flex-direction: column;
         padding: 10px;
@@ -135,10 +139,11 @@ style.textContent = `
         max-height: 100%;
         object-fit: contain;
     }
-    .ky-preview-meta {
+    .ky-header-meta {
         font-size: 12px;
         color: var(--fg-color);
         opacity: 0.8;
+        white-space: nowrap;
     }
 `;
 document.head.appendChild(style);
@@ -252,7 +257,7 @@ app.registerExtension({
                 this.addWidget("button", "📁 Open File Browser", null, async (widget, graphCanvas, node, pos, event) => {
                     const entered = (dirWidget?.value || "").trim().replace(/"/g, "");
                     if (!entered) {
-                        showFileBrowser("", (selectedPath) => { dirWidget.value = selectedPath; }, null, dirWidget);
+                        showFileBrowser("output", (selectedPath) => { dirWidget.value = selectedPath; }, null, dirWidget);
                         return;
                     }
                     try {
@@ -264,30 +269,18 @@ app.registerExtension({
                         } else if (data.type === "directory") {
                             showFileBrowser(entered, (selectedPath) => { dirWidget.value = selectedPath; }, null, dirWidget);
                         } else {
-                            showFileBrowser("", (selectedPath) => { dirWidget.value = selectedPath; }, null, dirWidget);
-                        }
+                            showFileBrowser("output", (selectedPath) => { dirWidget.value = selectedPath; }, null, dirWidget);
+                            }
                     } catch (e) {
-                        showFileBrowser(entered, (selectedPath) => { dirWidget.value = selectedPath; }, null, dirWidget);
+                        showFileBrowser(entered || "output", (selectedPath) => { dirWidget.value = selectedPath; }, null, dirWidget);
                     }
                 });
 
-                // 添加路径变化监听，当路径输入框内容变化时自动处理
                 const originalCallback = dirWidget.callback;
-                let isInitialized = false;
-                
                 dirWidget.callback = function(value, ...args) {
                     if (originalCallback) {
                         originalCallback.call(this, value, ...args);
                     }
-                    if (suppressPathHandling) {
-                        suppressPathHandling = false;
-                        isInitialized = true;
-                        return;
-                    }
-                    if (isInitialized && value && value.trim()) {
-                        handlePathInput(value, dirWidget);
-                    }
-                    isInitialized = true;
                 };
 
                 return r;
@@ -371,7 +364,7 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
 
     const content = document.createElement("div");
     content.style.cssText = `
-        width: 80vw; height: 80vh;
+        width: 100vw; height: 100vh;
         background: var(--comfy-menu-bg);
         border-radius: 8px; border: 1px solid var(--border-color);
         display: flex; flex-direction: column; overflow: hidden;
@@ -399,13 +392,13 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
                     </select>
                 </div>
                 <input type="text" class="ky-current-path" id="ky-path-input" readonly />
+                <span class="ky-header-meta" id="ky-header-meta"></span>
             </div>
             <div class="ky-browser-body">
                 <div class="ky-file-list" id="ky-file-list"></div>
                 <div class="ky-preview" id="ky-preview">
                     <div class="ky-preview-title">Preview</div>
                     <div class="ky-preview-content" id="ky-preview-content"></div>
-                    <div class="ky-preview-meta" id="ky-preview-meta"></div>
                 </div>
             </div>
             <div class="ky-browser-footer">
@@ -425,7 +418,7 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
     const filterSelect = content.querySelector("#ky-filter-select");
     const previewEl = content.querySelector("#ky-preview");
     const previewContentEl = content.querySelector("#ky-preview-content");
-    const previewMetaEl = content.querySelector("#ky-preview-meta");
+    const headerMetaEl = content.querySelector("#ky-header-meta");
 
     let currentPath = initialPath || "";
     let parentPath = ""; // 由后端 API 提供
@@ -433,6 +426,9 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
     let currentFilter = "all"; // 当前过滤类型
     let allFiles = []; // 存储所有文件，用于过滤
     let initialFilePath = filePathToPreview; // 存储初始文件路径，用于预览
+    let renderedFiles = [];
+    let previewCache = new Map();
+    let currentPreviewToken = 0;
 
     function finalizeSelection(finalPath) {
         if (finalPath === "My Computer") {
@@ -488,9 +484,170 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
                 pathInput.value = file.path;
                 initialFilePath = null;
                 updatePreview(file);
+                if (item.scrollIntoView) item.scrollIntoView({ block: "nearest" });
+                prefetchNeighbors();
                 break;
             }
         }
+    }
+
+    function findFirstFileIndex() {
+        const i = renderedFiles.findIndex(f => f.type === "file");
+        return i === -1 ? 0 : i;
+    }
+
+    function findLastFileIndex() {
+        for (let i = renderedFiles.length - 1; i >= 0; i--) {
+            if (renderedFiles[i].type === "file") return i;
+        }
+        return renderedFiles.length - 1;
+    }
+
+    function findNextFileIndex(start, step) {
+        let i = start + step;
+        if (i < 0) i = 0;
+        if (i > renderedFiles.length - 1) i = renderedFiles.length - 1;
+        const dir = step >= 0 ? 1 : -1;
+        while (i >= 0 && i < renderedFiles.length) {
+            if (renderedFiles[i].type === "file") return i;
+            i += dir;
+        }
+        return start;
+    }
+
+    function moveSelection(delta) {
+        if (!renderedFiles || renderedFiles.length === 0) return;
+        let idx = renderedFiles.findIndex(f => f.path === selectedItemPath);
+        if (idx === -1) idx = findFirstFileIndex();
+        const nextIdx = findNextFileIndex(idx, delta);
+        selectFileAndPreview(renderedFiles[nextIdx]);
+    }
+
+    function getPageStep() {
+        const firstItem = fileListEl.querySelector(".ky-file-item");
+        const itemHeight = firstItem ? firstItem.offsetHeight : 24;
+        const page = Math.floor(fileListEl.clientHeight / (itemHeight || 1));
+        return page > 0 ? page : 10;
+    }
+
+    function prefetchNeighbors() {
+        if (!renderedFiles || renderedFiles.length === 0 || !selectedItemPath) return;
+        const idx = renderedFiles.findIndex(f => f.path === selectedItemPath);
+        const neighbors = [idx - 1, idx + 1];
+        for (const i of neighbors) {
+            if (i >= 0 && i < renderedFiles.length) {
+                const f = renderedFiles[i];
+                if (f.type === "file") ensureCached(f);
+            }
+        }
+    }
+
+    async function ensureCached(file) {
+        if (!file || file.type !== "file") return;
+        if (previewCache.has(file.path)) return;
+        try {
+            const response = await api.fetchApi("/ky_utils/file_preview", {
+                method: "POST",
+                body: JSON.stringify({ path: file.path })
+            });
+            const info = await response.json();
+            if (info && !info.error) {
+                if (info.type === "image" && info.preview_url) {
+                    const img = new Image();
+                    const entry = { info, element: img };
+                    previewCache.set(file.path, entry);
+                    img.onload = () => {};
+                    img.src = info.preview_url;
+                } else if (info.type === "text") {
+                    previewCache.set(file.path, { info });
+                } else if ((info.type === "video" || info.type === "audio") && info.preview_url) {
+                    previewCache.set(file.path, { info });
+                } else {
+                    previewCache.set(file.path, { info });
+                }
+            }
+        } catch (e) {}
+    }
+
+    async function updatePreview(file) {
+        const previewContentEl = document.querySelector("#ky-preview-content");
+        if (!previewContentEl) return;
+    if (!file || file.type !== "file") {
+        if (headerMetaEl) headerMetaEl.textContent = "";
+        return;
+    }
+        const token = ++currentPreviewToken;
+        let cached = previewCache.get(file.path);
+        if (!cached) {
+            try {
+                const response = await api.fetchApi("/ky_utils/file_preview", {
+                    method: "POST",
+                    body: JSON.stringify({ path: file.path })
+                });
+                const info = await response.json();
+                if (info.error) {
+                if (token !== currentPreviewToken) return;
+                if (headerMetaEl) headerMetaEl.textContent = "";
+                return;
+                }
+                if (info.type === "image" && info.preview_url) {
+                    const img = new Image();
+                    cached = { info, element: img };
+                    previewCache.set(file.path, cached);
+                    img.onload = () => {
+                        if (token !== currentPreviewToken) return;
+                        clearPreview();
+                        const clone = img.cloneNode();
+                        previewContentEl.appendChild(clone);
+                    };
+                    img.src = info.preview_url;
+                } else {
+                    cached = { info };
+                    previewCache.set(file.path, cached);
+                }
+            } catch (e) {
+            if (token !== currentPreviewToken) return;
+            previewContentEl.textContent = "Preview failed";
+            return;
+            }
+        }
+        const info = cached.info;
+    const sizeStr = typeof info?.size === "number" ? `${info.size} bytes` : "";
+    if (headerMetaEl) headerMetaEl.textContent = `${file.name}${sizeStr ? ` • ${sizeStr}` : ""}`;
+        if (info?.type === "image" && cached.element) {
+            if (cached.element.complete) {
+                clearPreview();
+                const clone = cached.element.cloneNode();
+                previewContentEl.appendChild(clone);
+            }
+        } else if (info?.type === "text" && info.snippet) {
+            clearPreview();
+            const pre = document.createElement("pre");
+            pre.style.whiteSpace = "pre-wrap";
+            pre.style.wordBreak = "break-word";
+            pre.textContent = info.snippet;
+            previewContentEl.appendChild(pre);
+        } else if (info?.type === "video" && info.preview_url) {
+            clearPreview();
+            const video = document.createElement("video");
+            video.controls = true;
+            video.style.width = "100%";
+            video.style.height = "100%";
+            video.src = info.preview_url;
+            previewContentEl.appendChild(video);
+        } else if (info?.type === "audio" && info.preview_url) {
+            clearPreview();
+            const audio = document.createElement("audio");
+            audio.controls = true;
+            audio.style.width = "100%";
+            audio.src = info.preview_url;
+            previewContentEl.appendChild(audio);
+        } else {
+            clearPreview();
+            previewContentEl.textContent = "No preview available";
+        }
+        ensureCached(file);
+        prefetchNeighbors();
     }
 
     function render(data) {
@@ -521,8 +678,9 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
         
         // 根据当前过滤条件筛选文件
         const filteredFiles = allFiles.filter(file => shouldShowFile(file, currentFilter));
+        renderedFiles = filteredFiles;
         
-        filteredFiles.forEach(file => {
+        filteredFiles.forEach((file, i) => {
             const el = document.createElement("div");
             el.className = "ky-file-item";
             
@@ -534,6 +692,7 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
             
             el.innerHTML = `<span class="ky-item-icon">${icon}</span> ${file.name}`;
             el.dataset.path = file.path;
+            el.dataset.index = String(i);
             
             el.onclick = () => {
                 // 如果是文件夹或驱动器，点击进入
@@ -617,6 +776,32 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
             e.preventDefault();
             e.stopPropagation();
             selectBtn.onclick();
+        } else if (e.key === "ArrowDown") {
+            e.preventDefault();
+            e.stopPropagation();
+            moveSelection(1);
+        } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            e.stopPropagation();
+            moveSelection(-1);
+        } else if (e.key === "PageDown") {
+            e.preventDefault();
+            e.stopPropagation();
+            moveSelection(getPageStep());
+        } else if (e.key === "PageUp") {
+            e.preventDefault();
+            e.stopPropagation();
+            moveSelection(-getPageStep());
+        } else if (e.key === "Home") {
+            e.preventDefault();
+            e.stopPropagation();
+            const idx = findFirstFileIndex();
+            selectFileAndPreview(renderedFiles[idx]);
+        } else if (e.key === "End") {
+            e.preventDefault();
+            e.stopPropagation();
+            const idx = findLastFileIndex();
+            selectFileAndPreview(renderedFiles[idx]);
         }
     };
     
@@ -633,59 +818,11 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
 
 function clearPreview() {
     const previewContentEl = document.querySelector("#ky-preview-content");
-    const previewMetaEl = document.querySelector("#ky-preview-meta");
     if (previewContentEl) previewContentEl.innerHTML = "";
-    if (previewMetaEl) previewMetaEl.textContent = "";
 }
 
-async function updatePreview(file) {
-    const previewContentEl = document.querySelector("#ky-preview-content");
-    const previewMetaEl = document.querySelector("#ky-preview-meta");
-    if (!previewContentEl || !previewMetaEl) return;
-    clearPreview();
-    if (!file || file.type !== "file") {
-        previewMetaEl.textContent = "Select a file to preview";
-        return;
-    }
-    try {
-        const response = await api.fetchApi("/ky_utils/file_preview", {
-            method: "POST",
-            body: JSON.stringify({ path: file.path })
-        });
-        const info = await response.json();
-        if (info.error) {
-            previewMetaEl.textContent = "Preview unavailable";
-            return;
-        }
-        const sizeStr = typeof info.size === "number" ? `${info.size} bytes` : "";
-        previewMetaEl.textContent = `${file.name}${sizeStr ? ` • ${sizeStr}` : ""}`;
-        if (info.type === "image" && info.preview_url) {
-            const img = document.createElement("img");
-            img.src = info.preview_url;
-            previewContentEl.appendChild(img);
-        } else if (info.type === "text" && info.snippet) {
-            const pre = document.createElement("pre");
-            pre.style.whiteSpace = "pre-wrap";
-            pre.style.wordBreak = "break-word";
-            pre.textContent = info.snippet;
-            previewContentEl.appendChild(pre);
-        } else if (info.type === "video" && info.preview_url) {
-            const video = document.createElement("video");
-            video.controls = true;
-            video.style.width = "100%";
-            video.style.height = "100%";
-            video.src = info.preview_url;
-            previewContentEl.appendChild(video);
-        } else if (info.type === "audio" && info.preview_url) {
-            const audio = document.createElement("audio");
-            audio.controls = true;
-            audio.style.width = "100%";
-            audio.src = info.preview_url;
-            previewContentEl.appendChild(audio);
-        } else {
-            previewContentEl.textContent = "No preview available";
-        }
-    } catch (e) {
-        previewContentEl.textContent = "Preview failed";
-    }
-}
+//
+
+//
+
+//

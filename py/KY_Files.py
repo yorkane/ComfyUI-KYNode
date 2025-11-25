@@ -10,6 +10,11 @@ import string
 from server import PromptServer
 from aiohttp import web
 import comfy.utils
+import os
+try:
+    import folder_paths
+except Exception:
+    folder_paths = None
 
 from .utils.image_convert import pil2tensor
 
@@ -281,7 +286,15 @@ def register_routes():
 
             # 默认路径处理
             if not path:
-                path = os.getcwd()
+                default_output = None
+                try:
+                    if folder_paths is not None:
+                        default_output = folder_paths.get_output_directory()
+                except Exception:
+                    default_output = None
+                if not default_output:
+                    default_output = os.path.join(os.getcwd(), "output")
+                path = default_output if os.path.exists(default_output) else os.getcwd()
             
             # 路径存在性检查
             if not os.path.exists(path):
