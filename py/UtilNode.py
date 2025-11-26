@@ -784,7 +784,31 @@ class KY_MergeToJSON:
                     
         return result
 
+class KY_DummyOut:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+            "any1": (any_typ, ),
+            "any2": (any_typ, ),
+            "any3": (any_typ, ),
+            "any4": (any_typ, ),
+            "any5": (any_typ, ),
+            },
+        }
 
+    RETURN_TYPES = (any_typ,any_typ,any_typ,any_typ,any_typ,)
+    RETURN_NAMES = ("any1", "any2", "any3", "any4", "any5",)
+    FUNCTION = "dummy"
+    CATEGORY = "KYNode/misc"
+    OUTPUT_NODE = True
+    DESCRIPTION = """
+Does nothing, used to trigger generic workflow output.    
+A way to get previews in the UI without saving anything to disk.
+"""
+
+    def dummy(self, any1, any2, any3, any4, any5):
+        return (any1, any2, any3, any4, any5,)
 NODE_CLASS_MAPPINGS = {
     "KY_JoinToString": KY_JoinToString,
     "KY_RegexReplace": KY_RegexReplace,
@@ -795,6 +819,7 @@ NODE_CLASS_MAPPINGS = {
     "KY_isNone": KY_isNone_blocker,
     "KY_MergeToJSON":  KY_MergeToJSON,
     "KY_First_NOT_EMPTY": KY_First_NOT_EMPTY,
+    "KY_DummyOut": KY_DummyOut,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -807,4 +832,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "KY_isNone": "Block if None or empty ",
     "KY_MergeToJSON":  "Merge Json",
     "KY_First_NOT_EMPTY": "First NOT NONE",
+    "KY_DummyOut": "Dummy Out to trigger workflow",
 }

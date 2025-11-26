@@ -467,6 +467,7 @@ def register_routes():
             path = q.get("path")
             if not path or not os.path.exists(path) or not os.path.isfile(path):
                 return web.Response(status=404)
+            filename = os.path.basename(path)
             
             # 获取文件扩展名并检查是否为过滤类型
             ext_with_dot = Path(path).suffix.lower()
@@ -521,7 +522,7 @@ def register_routes():
                 if ext in image_ext:
                     with open(path, "rb") as f:
                         content = f.read()
-                    return web.Response(body=content, content_type=mime)
+                    return web.Response(body=content, content_type=mime, headers={"Content-Disposition": f"inline; filename=\"{filename}\""})
                 elif ext in audio_ext or ext in video_ext:
                     file_size = os.path.getsize(path)
                     range_header = request.headers.get("Range")
@@ -545,6 +546,7 @@ def register_routes():
                                 "Content-Range": f"bytes {start}-{end}/{file_size}",
                                 "Accept-Ranges": "bytes",
                                 "Content-Length": str(len(data)),
+                                "Content-Disposition": f"inline; filename=\"{filename}\"",
                             }
                             return web.Response(status=206, body=data, headers=headers, content_type=mime)
                         except Exception:
@@ -554,6 +556,7 @@ def register_routes():
                     headers = {
                         "Accept-Ranges": "bytes",
                         "Content-Length": str(len(content)),
+                        "Content-Disposition": f"inline; filename=\"{filename}\"",
                     }
                     return web.Response(body=content, headers=headers, content_type=mime)
                 return web.Response(status=415)

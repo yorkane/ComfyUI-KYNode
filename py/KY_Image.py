@@ -54,103 +54,6 @@ class ReadImage:
 
         return (image, file_stem)
 
-
-class LoadImagesFromFolder:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            'required': {
-                'input_path': ('STRING', {'default': '', 'multiline': False}),
-                'start_index': ('INT', {'default': 0, 'min': 0, 'max': 9999}),
-                'max_index': ('INT', {'default': 1, 'min': 1, 'max': 9999}),
-                'step': ('INT', {'default': 1, 'min': 1, 'max': 100}),
-            }
-        }
-
-    RETURN_TYPES = (
-        'IMAGE',
-        'STRING',
-    )
-    RETURN_NAMES = (
-        'image_batch',
-        'file_names',
-    )
-    OUTPUT_IS_LIST = (
-        False,
-        True,
-    )
-    FUNCTION = 'make_list'
-    CATEGORY = _CATEGORY
-    DESCRIPTION = 'read images from folder and return image batch and file names'
-
-    def make_list(self, start_index, max_index, input_path, step):
-        # 判断是否为绝对路径
-        if os.path.isabs(input_path):
-            full_input_dir = input_path
-        else:
-            # 相对路径则基于输出目录
-            full_input_dir = os.path.join(folder_paths.get_output_directory(), input_path)
-
-        # 检查输入路径是否存在
-        if not os.path.exists(full_input_dir):
-            raise FileNotFoundError(f'文件夹未找到: {full_input_dir}')
-
-        # 检查文件夹是否为空
-        if not os.listdir(full_input_dir):
-            raise ValueError(f'文件夹为空: {full_input_dir}')
-
-        # 对文件列表进行排序
-        file_list = sorted(
-            os.listdir(full_input_dir),
-            key=lambda s: sum(((s, int(n)) for s, n in re.findall(r'(\D+)(\d+)', 'a%s0' % s)), ()),
-        )
-
-        image_list = []
-        file_names = []  # 新增文件名列表
-
-        # 确保 start_index 在列表范围内
-        start_index = max(0, min(start_index, len(file_list) - 1))
-
-        # 计算结束索引
-        end_index = min(start_index + max_index, len(file_list))
-
-        ref_image = None
-
-        for num in range(start_index, end_index, step):
-            fname = os.path.join(full_input_dir, file_list[num])
-            file_names.append(file_list[num])  # 添加文件名到列表
-            img = Image.open(fname)
-            img = ImageOps.exif_transpose(img)
-            if img is None:
-                raise ValueError(f'无法从文件中读取有效图像: {fname}')
-            image = img.convert('RGB')
-
-            t_image = pil2tensor(image)
-            # 确保所有图像的尺寸相同
-            if ref_image is None:
-                ref_image = t_image
-            else:
-                if t_image.shape[1:] != ref_image.shape[1:]:
-                    t_image = comfy.utils.common_upscale(
-                        t_image.movedim(-1, 1),
-                        ref_image.shape[2],
-                        ref_image.shape[1],
-                        'lanczos',
-                        'center',
-                    ).movedim(1, -1)
-
-            image_list.append(t_image)
-
-        if not image_list:
-            raise ValueError('未找到有效图像')
-
-        image_batch = torch.cat(image_list, dim=0)
-
-        return (
-            image_batch,
-            file_names,
-        )
-
 class KY_SaveImageToPath:
     @classmethod
     def INPUT_TYPES(s):
@@ -489,7 +392,6 @@ class CropImageByXYWH:
 
 NODE_CLASS_MAPPINGS = {
     "KY_ReadImage": ReadImage,
-    "KY_LoadImagesFromFolder": LoadImagesFromFolder,
     "KY_SaveImageToPath": KY_SaveImageToPath,
     "KY_LoadImageFrom": KY_LoadImageFrom,
     "KY_CropImageByXYWH": CropImageByXYWH
@@ -497,7 +399,6 @@ NODE_CLASS_MAPPINGS = {
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "KY_ReadImage": "Read Image from Path",
-    "KY_LoadImagesFromFolder": "Load Images From Folder",
     "KY_SaveImageToPath": "Save Images To Path with sequence number",
     "KY_LoadImageFrom": "Load Image (Path/URL/Base64/Input)",
     "KY_CropImageByXYWH": "Crop Image by XYWH"
