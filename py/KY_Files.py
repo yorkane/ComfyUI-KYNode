@@ -17,6 +17,7 @@ except Exception:
     folder_paths = None
 
 from .utils.image_convert import pil2tensor
+from .UtilNode import any_typ, is_deep_empty
 
 _CATEGORY = "KYNode/files"
 
@@ -129,20 +130,35 @@ class KY_GetFromPath:
             },
             "optional": {
                 "create_missing_folder": ("BOOLEAN", {"default": False, "label_on": "True", "label_off": "False", "tooltip": "Create the directory only if it does not exist AND path ends with '/' or '\\'."}),
+                "dummy_input": (any_typ,),
+                "override_path": (any_typ,),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
             },
         }
 
-    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "IMAGE", "STRING")
-    RETURN_NAMES = ("full_path", "current_dir", "parent_dir", "filename", "image", "text")
+    RETURN_TYPES = ("STRING", "STRING", "IMAGE", "STRING")
+    RETURN_NAMES = ("full_path", "parent_dir", "image", "text")
     FUNCTION = "process_path"
-    CATEGORY = "KY_Nodes/Path"
+    CATEGORY = _CATEGORY
+    DESCRIPTION = """
+    获取路径中的文件信息。
+    - path: 输入路径（支持相对路径、绝对路径、环境变量等）
+    - create_missing_folder: 如果路径不存在，是否创建目录（仅当路径以 '/' 或 '\\' 结尾时有效）
+    - dummy_input: 任意输入（用于触发节点执行）
+    - override_path: 可选覆盖路径（如果非空且非 "*"，则优先使用）
+    返回：
+    - full_path: 规范化后的绝对路径
+    - parent_dir: 路径的父目录（如果路径是目录）
+    - image: 如果路径是图像文件，返回图像张量（否则为 None）
+    - text: 如果路径是文本文件，返回文件内容（否则为空字符串）
+    """
 
-    def process_path(self, path, create_missing_folder=False, unique_id=None):
+    def process_path(self, path, create_missing_folder=False, dummy_input=None, override_path="", unique_id=None):
         # 1. 基础路径处理
-        raw_path = path
+        override_text = str(override_path).strip() if override_path is not None else ""
+        raw_path = override_text if (override_text not in ("", "*") and not is_deep_empty(override_path)) else path
 
         # 2. 规范化路径 (处理混合斜杠、.. 等)
         # os.path.normpath 会根据当前操作系统将 / 转换为 \ (Windows) 或保持 / (Linux)
@@ -168,13 +184,10 @@ class KY_GetFromPath:
         # 5. 提取信息
         # 注意：如果刚刚执行了创建目录，os.path.isdir(abs_path) 现在将返回 True
         if os.path.isdir(abs_path):
-            current_dir = abs_path
-            filename = "" 
             parent_dir = os.path.dirname(abs_path)
         else:
             # 如果路径存在但不是目录（是文件），或者路径仍然不存在（create_missing_folder=False 或 创建失败）
             current_dir = os.path.dirname(abs_path)
-            filename = os.path.basename(abs_path)
             parent_dir = os.path.dirname(current_dir)
 
         # 6. 初始化返回对象
@@ -224,7 +237,7 @@ class KY_GetFromPath:
             except Exception as e:
                 print(f"[KY_GetFromPath] Error loading file {abs_path}: {e}")
 
-        return (abs_path, current_dir, parent_dir, filename, image_tensor, text_content)
+        return (abs_path, parent_dir, image_tensor, text_content)
 
 # --- 工具函数 ---
 
@@ -467,7 +480,6 @@ def register_routes():
             path = q.get("path")
             if not path or not os.path.exists(path) or not os.path.isfile(path):
                 return web.Response(status=404)
-            filename = os.path.basename(path)
             
             # 获取文件扩展名并检查是否为过滤类型
             ext_with_dot = Path(path).suffix.lower()
@@ -522,7 +534,7 @@ def register_routes():
                 if ext in image_ext:
                     with open(path, "rb") as f:
                         content = f.read()
-                    return web.Response(body=content, content_type=mime, headers={"Content-Disposition": f"inline; filename=\"{filename}\""})
+                    return web.Response(body=content, content_type=mime)
                 elif ext in audio_ext or ext in video_ext:
                     file_size = os.path.getsize(path)
                     range_header = request.headers.get("Range")
@@ -546,7 +558,6 @@ def register_routes():
                                 "Content-Range": f"bytes {start}-{end}/{file_size}",
                                 "Accept-Ranges": "bytes",
                                 "Content-Length": str(len(data)),
-                                "Content-Disposition": f"inline; filename=\"{filename}\"",
                             }
                             return web.Response(status=206, body=data, headers=headers, content_type=mime)
                         except Exception:
@@ -556,7 +567,6 @@ def register_routes():
                     headers = {
                         "Accept-Ranges": "bytes",
                         "Content-Length": str(len(content)),
-                        "Content-Disposition": f"inline; filename=\"{filename}\"",
                     }
                     return web.Response(body=content, headers=headers, content_type=mime)
                 return web.Response(status=415)
