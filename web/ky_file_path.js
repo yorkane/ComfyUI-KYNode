@@ -393,6 +393,7 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
                 </div>
                 <input type="text" class="ky-current-path" id="ky-path-input" readonly />
                 <span class="ky-header-meta" id="ky-header-meta"></span>
+                <a class="ky-btn" id="ky-download-btn" style="display:none">⬇ Save</a>
             </div>
             <div class="ky-browser-body">
                 <div class="ky-file-list" id="ky-file-list"></div>
@@ -419,6 +420,7 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
     const previewEl = content.querySelector("#ky-preview");
     const previewContentEl = content.querySelector("#ky-preview-content");
     const headerMetaEl = content.querySelector("#ky-header-meta");
+    const downloadBtn = content.querySelector("#ky-download-btn");
 
     let currentPath = initialPath || "";
     let parentPath = ""; // 由后端 API 提供
@@ -574,6 +576,11 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
         if (!previewContentEl) return;
     if (!file || file.type !== "file") {
         if (headerMetaEl) headerMetaEl.textContent = "";
+        if (downloadBtn) {
+            downloadBtn.style.display = "none";
+            downloadBtn.removeAttribute("href");
+            downloadBtn.removeAttribute("download");
+        }
         return;
     }
         const token = ++currentPreviewToken;
@@ -614,6 +621,17 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
         const info = cached.info;
     const sizeStr = typeof info?.size === "number" ? `${info.size} bytes` : "";
     if (headerMetaEl) headerMetaEl.textContent = `${file.name}${sizeStr ? ` • ${sizeStr}` : ""}`;
+    if (downloadBtn) {
+        if (info?.preview_url) {
+            downloadBtn.style.display = "";
+            downloadBtn.setAttribute("href", info.preview_url);
+            downloadBtn.setAttribute("download", file.name);
+        } else {
+            downloadBtn.style.display = "none";
+            downloadBtn.removeAttribute("href");
+            downloadBtn.removeAttribute("download");
+        }
+    }
         if (info?.type === "image" && cached.element) {
             if (cached.element.complete) {
                 clearPreview();

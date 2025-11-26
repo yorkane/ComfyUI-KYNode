@@ -11,6 +11,7 @@ from server import PromptServer
 from aiohttp import web
 import comfy.utils
 import os
+from urllib.parse import quote
 try:
     import folder_paths
 except Exception:
@@ -453,7 +454,7 @@ def register_routes():
             snippet = None
             if ftype == "image":
                 can_preview = True
-                preview_url = f"/ky_utils/stream?path={path}"
+                preview_url = f"/ky_utils/stream/{quote(os.path.basename(path))}?path={quote(path)}"
             elif ftype == "text":
                 can_preview = True
                 try:
@@ -464,7 +465,7 @@ def register_routes():
                     snippet = ""
             elif ftype in ("audio","video"):
                 can_preview = True
-                preview_url = f"/ky_utils/stream?path={path}"
+                preview_url = f"/ky_utils/stream/{quote(os.path.basename(path))}?path={quote(path)}"
             return web.json_response({
                 "type": ftype,
                 "size": size,
@@ -480,6 +481,7 @@ def register_routes():
             path = q.get("path")
             if not path or not os.path.exists(path) or not os.path.isfile(path):
                 return web.Response(status=404)
+            filename = os.path.basename(path)
             
             # 获取文件扩展名并检查是否为过滤类型
             ext_with_dot = Path(path).suffix.lower()
@@ -534,7 +536,7 @@ def register_routes():
                 if ext in image_ext:
                     with open(path, "rb") as f:
                         content = f.read()
-                    return web.Response(body=content, content_type=mime)
+                    return web.Response(body=content, content_type=mime, headers={"Content-Disposition": f"inline; filename=\"{filename}\""})
                 elif ext in audio_ext or ext in video_ext:
                     file_size = os.path.getsize(path)
                     range_header = request.headers.get("Range")
@@ -558,6 +560,7 @@ def register_routes():
                                 "Content-Range": f"bytes {start}-{end}/{file_size}",
                                 "Accept-Ranges": "bytes",
                                 "Content-Length": str(len(data)),
+                                "Content-Disposition": f"inline; filename=\"{filename}\"",
                             }
                             return web.Response(status=206, body=data, headers=headers, content_type=mime)
                         except Exception:
@@ -567,6 +570,105 @@ def register_routes():
                     headers = {
                         "Accept-Ranges": "bytes",
                         "Content-Length": str(len(content)),
+                        "Content-Disposition": f"inline; filename=\"{filename}\"",
+                    }
+                    return web.Response(body=content, headers=headers, content_type=mime)
+                return web.Response(status=415)
+            except Exception:
+                return web.Response(status=500)
+
+        @PromptServer.instance.routes.get("/ky_utils/stream/{name}")
+        async def stream_file_with_name(request):
+            q = request.rel_url.query
+            path = q.get("path")
+            if not path or not os.path.exists(path) or not os.path.isfile(path):
+                return web.Response(status=404)
+            # 复用与上面相同的逻辑
+            ext_with_dot = Path(path).suffix.lower()
+            filtered_extensions = {'.py', '.pyw', '.pyc', '.pyo', '.pyd',
+                                  '.sh', '.bash', '.zsh', '.fish',
+                                  '.bat', '.cmd', '.ps1', '.psm1', '.psd1',
+                                  '.ini', '.cfg', '.conf', '.config',
+                                  '.yaml', '.yml', '.toml'}
+            if ext_with_dot in filtered_extensions:
+                return web.Response(status=404)
+            ext = ext_with_dot.lstrip(".")
+            image_ext = {"jpg","jpeg","png","gif","bmp","svg","webp","ico","tiff","tif"}
+            audio_ext = {"mp3","wav","flac","aac","ogg","wma","m4a","opus"}
+            video_ext = {"mp4","avi","mkv","mov","wmv","flv","webm","m4v","3gp","ogv"}
+            mime = "application/octet-stream"
+            mime_map = {
+                "jpg": "image/jpeg",
+                "jpeg": "image/jpeg",
+                "png": "image/png",
+                "gif": "image/gif",
+                "bmp": "image/bmp",
+                "svg": "image/svg+xml",
+                "webp": "image/webp",
+                "ico": "image/x-icon",
+                "tiff": "image/tiff",
+                "tif": "image/tiff",
+                "mp3": "audio/mpeg",
+                "wav": "audio/wav",
+                "flac": "audio/flac",
+                "aac": "audio/aac",
+                "ogg": "audio/ogg",
+                "wma": "audio/x-ms-wma",
+                "m4a": "audio/mp4",
+                "opus": "audio/opus",
+                "mp4": "video/mp4",
+                "avi": "video/x-msvideo",
+                "mkv": "video/x-matroska",
+                "mov": "video/quicktime",
+                "wmv": "video/x-ms-wmv",
+                "flv": "video/x-flv",
+                "webm": "video/webm",
+                "m4v": "video/x-m4v",
+                "3gp": "video/3gpp",
+                "ogv": "video/ogg",
+            }
+            if ext in mime_map:
+                mime = mime_map[ext]
+            filename = os.path.basename(path)
+            try:
+                if ext in image_ext:
+                    with open(path, "rb") as f:
+                        content = f.read()
+                    return web.Response(body=content, content_type=mime, headers={"Content-Disposition": f"inline; filename=\"{filename}\""})
+                elif ext in audio_ext or ext in video_ext:
+                    file_size = os.path.getsize(path)
+                    range_header = request.headers.get("Range")
+                    if range_header:
+                        try:
+                            units, rng = range_header.split("=", 1)
+                            if units != "bytes":
+                                return web.Response(status=416)
+                            start_str, end_str = rng.split("-", 1)
+                            start = int(start_str) if start_str else 0
+                            end = int(end_str) if end_str else file_size - 1
+                            if start >= file_size:
+                                return web.Response(status=416)
+                            if end >= file_size:
+                                end = file_size - 1
+                            length = end - start + 1
+                            with open(path, "rb") as f:
+                                f.seek(start)
+                                data = f.read(length)
+                            headers = {
+                                "Content-Range": f"bytes {start}-{end}/{file_size}",
+                                "Accept-Ranges": "bytes",
+                                "Content-Length": str(len(data)),
+                                "Content-Disposition": f"inline; filename=\"{filename}\"",
+                            }
+                            return web.Response(status=206, body=data, headers=headers, content_type=mime)
+                        except Exception:
+                            return web.Response(status=500)
+                    with open(path, "rb") as f:
+                        content = f.read()
+                    headers = {
+                        "Accept-Ranges": "bytes",
+                        "Content-Length": str(len(content)),
+                        "Content-Disposition": f"inline; filename=\"{filename}\"",
                     }
                     return web.Response(body=content, headers=headers, content_type=mime)
                 return web.Response(status=415)
