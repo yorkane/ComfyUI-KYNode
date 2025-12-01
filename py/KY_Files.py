@@ -11,6 +11,7 @@ from server import PromptServer
 from aiohttp import web
 import comfy.utils
 import os
+import shutil
 from urllib.parse import quote
 try:
     import folder_paths
@@ -347,60 +348,118 @@ def register_routes():
                     parent_path = "" # Linux 根目录没有父级
 
             # --- 读取文件列表 ---
+            # 只有非根目录(Linux)或非特殊情况才添加 ".." 
+            # 但前端通常依赖 parent_path 按钮，这里为了列表完整性可以保留，
+            # 或者由前端根据 parent_path 渲染返回按钮
+            if parent_path:
+                    folders.append({"name": "..", "type": "dir", "path": parent_path})
+
+            # 定义需要过滤的文件扩展名和目录名
+            filtered_extensions = {'.py', '.pyw', '.pyc', '.pyo', '.pyd',  # Python相关
+                                    '.sh', '.bash', '.zsh', '.fish',         # Shell脚本
+                                    '.bat', '.cmd', '.ps1', '.psm1', '.psd1', # Windows批处理和PowerShell
+                                    '.ini', '.cfg', '.conf', '.config',       # 配置文件
+                                    '.yaml', '.yml', '.toml'}                 # 其他配置文件格式
+            
+            filtered_dir_names = {'__pycache__', '.git', '.svn', '.hg',      # 版本控制和Python缓存
+                                    'node_modules', '.vscode', '.idea'}        # 开发工具目录
+
+            for item in os.listdir(path):
+                if item.startswith('.'): continue
+                
+                full_item_path = os.path.join(path, item)
+                
+                # 检查类型和权限
+                try:
+                    if os.path.isdir(full_item_path):
+                        # 过滤特定目录名
+                        if item in filtered_dir_names:
+                            continue
+                        try:
+                            mtime = os.path.getmtime(full_item_path)
+                        except Exception:
+                            mtime = 0
+                        try:
+                            ctime = os.path.getctime(full_item_path)
+                        except Exception:
+                            ctime = 0
+                        folders.append({"name": item, "type": "dir", "path": full_item_path, "modified": mtime, "created": ctime})
+                    else:
+                        # 获取文件扩展名并检查是否需要过滤
+                        _, ext = os.path.splitext(item.lower())
+                        if ext in filtered_extensions:
+                            continue
+                        try:
+                            mtime = os.path.getmtime(full_item_path)
+                        except Exception:
+                            mtime = 0
+                        try:
+                            ctime = os.path.getctime(full_item_path)
+                        except Exception:
+                            ctime = 0
+                        files.append({"name": item, "type": "file", "path": full_item_path, "modified": mtime, "created": ctime})
+                except OSError:
+                    # 忽略无权访问的文件/链接
+                    continue
+            # 排序
+            folders.sort(key=lambda x: x['name'].lower())
+            files.sort(key=lambda x: x['name'].lower())
+            
+            result = folders + files
+            return web.json_response({
+                "path": path, 
+                "parent_path": parent_path,
+                "files": result
+            })
+
+        @PromptServer.instance.routes.delete("/ky_utils/delete")
+        async def delete_path(request):
             try:
-                # 只有非根目录(Linux)或非特殊情况才添加 ".." 
-                # 但前端通常依赖 parent_path 按钮，这里为了列表完整性可以保留，
-                # 或者由前端根据 parent_path 渲染返回按钮
-                if parent_path:
-                     folders.append({"name": "..", "type": "dir", "path": parent_path})
+                data = await request.json()
+                path = data.get("path", "")
+                if not path:
+                    return web.json_response({"error": "No path provided"}, status=400)
+                abs_path = os.path.abspath(path)
+                if not os.path.exists(abs_path):
+                    return web.json_response({"error": "Path does not exist"}, status=404)
+                base = os.path.basename(abs_path)
+                if base == "..":
+                    return web.json_response({"error": "Invalid target"}, status=400)
 
-                # 定义需要过滤的文件扩展名和目录名
-                filtered_extensions = {'.py', '.pyw', '.pyc', '.pyo', '.pyd',  # Python相关
-                                      '.sh', '.bash', '.zsh', '.fish',         # Shell脚本
-                                      '.bat', '.cmd', '.ps1', '.psm1', '.psd1', # Windows批处理和PowerShell
-                                      '.ini', '.cfg', '.conf', '.config',       # 配置文件
-                                      '.yaml', '.yml', '.toml'}                 # 其他配置文件格式
-                
-                filtered_dir_names = {'__pycache__', '.git', '.svn', '.hg',      # 版本控制和Python缓存
-                                     'node_modules', '.vscode', '.idea'}        # 开发工具目录
+                input_root = None
+                output_root = None
+                try:
+                    if folder_paths is not None:
+                        input_root = folder_paths.get_input_directory()
+                        output_root = folder_paths.get_output_directory()
+                except Exception:
+                    input_root = None
+                    output_root = None
+                if not input_root:
+                    input_root = os.path.join(os.getcwd(), "input")
+                if not output_root:
+                    output_root = os.path.join(os.getcwd(), "output")
 
-                for item in os.listdir(path):
-                    if item.startswith('.'): continue
-                    
-                    full_item_path = os.path.join(path, item)
-                    
-                    # 检查类型和权限
-                    try:
-                        if os.path.isdir(full_item_path):
-                            # 过滤特定目录名
-                            if item in filtered_dir_names:
-                                continue
-                            folders.append({"name": item, "type": "dir", "path": full_item_path})
-                        else:
-                            # 获取文件扩展名并检查是否需要过滤
-                            _, ext = os.path.splitext(item.lower())
-                            if ext in filtered_extensions:
-                                continue
-                            files.append({"name": item, "type": "file", "path": full_item_path})
-                    except OSError:
-                        # 忽略无权访问的文件/链接
-                        continue
-                
-                # 排序
-                folders.sort(key=lambda x: x['name'].lower())
-                files.sort(key=lambda x: x['name'].lower())
-                
-                result = folders + files
-                return web.json_response({
-                    "path": path, 
-                    "parent_path": parent_path, # 关键：让后端告诉前端父级在哪里
-                    "files": result
-                })
-                
-            except PermissionError:
-                return web.json_response({"error": "Permission Denied", "path": path, "files": []})
+                roots = [os.path.abspath(input_root), os.path.abspath(output_root)]
+                try:
+                    allowed = any(os.path.commonpath([abs_path, r]) == r for r in roots if os.path.exists(r))
+                except Exception:
+                    allowed = False
+                if not allowed:
+                    return web.json_response({"error": "Deletion not permitted outside input/output"}, status=403)
+
+                try:
+                    if os.path.isfile(abs_path):
+                        os.remove(abs_path)
+                    elif os.path.isdir(abs_path):
+                        shutil.rmtree(abs_path)
+                    else:
+                        return web.json_response({"error": "Unsupported path type"}, status=400)
+                except Exception as e:
+                    return web.json_response({"error": str(e)}, status=500)
+                return web.json_response({"ok": True})
             except Exception as e:
-                return web.json_response({"error": str(e), "path": path, "files": []})
+                return web.json_response({"error": str(e)}, status=500)
                 
     except Exception as e:
         print(f"KY_GetFromPath: Error registering routes: {e}")
@@ -463,8 +522,12 @@ def register_routes():
                     snippet = data_bytes.decode("utf-8", errors="replace")
                 except Exception:
                     snippet = ""
+                preview_url = f"/ky_utils/stream/{quote(os.path.basename(path))}?path={quote(path)}"
             elif ftype in ("audio","video"):
                 can_preview = True
+                preview_url = f"/ky_utils/stream/{quote(os.path.basename(path))}?path={quote(path)}"
+            else:
+                # 其他类型也允许下载
                 preview_url = f"/ky_utils/stream/{quote(os.path.basename(path))}?path={quote(path)}"
             return web.json_response({
                 "type": ftype,
@@ -499,6 +562,8 @@ def register_routes():
             image_ext = {"jpg","jpeg","png","gif","bmp","svg","webp","ico","tiff","tif"}
             audio_ext = {"mp3","wav","flac","aac","ogg","wma","m4a","opus"}
             video_ext = {"mp4","avi","mkv","mov","wmv","flv","webm","m4v","3gp","ogv"}
+            text_ext = {"txt","md","rtf","log","csv","tsv","json","xml"}
+            text_ext = {"txt","md","rtf","log","csv","tsv","json","xml"}
             mime = "application/octet-stream"
             mime_map = {
                 "jpg": "image/jpeg",
@@ -573,7 +638,10 @@ def register_routes():
                         "Content-Disposition": f"inline; filename=\"{filename}\"",
                     }
                     return web.Response(body=content, headers=headers, content_type=mime)
-                return web.Response(status=415)
+                else:
+                    with open(path, "rb") as f:
+                        content = f.read()
+                    return web.Response(body=content, content_type=mime, headers={"Content-Disposition": f"inline; filename=\"{filename}\""})
             except Exception:
                 return web.Response(status=500)
 
@@ -671,7 +739,10 @@ def register_routes():
                         "Content-Disposition": f"inline; filename=\"{filename}\"",
                     }
                     return web.Response(body=content, headers=headers, content_type=mime)
-                return web.Response(status=415)
+                else:
+                    with open(path, "rb") as f:
+                        content = f.read()
+                    return web.Response(body=content, content_type=mime, headers={"Content-Disposition": f"inline; filename=\"{filename}\""})
             except Exception:
                 return web.Response(status=500)
     except Exception as e:

@@ -390,6 +390,16 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
                         <option value="text">📝 Text</option>
                         <option value="folder">📁 Folders Only</option>
                     </select>
+                    <span class="ky-filter-label">Sort:</span>
+                    <select class="ky-filter-select" id="ky-sort-select">
+                        <option value="name">Name</option>
+                        <option value="modified">Modified</option>
+                        <option value="created">Created</option>
+                    </select>
+                    <select class="ky-filter-select" id="ky-order-select">
+                        <option value="asc">Asc</option>
+                        <option value="desc">Desc</option>
+                    </select>
                 </div>
                 <input type="text" class="ky-current-path" id="ky-path-input" readonly />
                 <span class="ky-header-meta" id="ky-header-meta"></span>
@@ -417,6 +427,8 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
     const cancelBtn = content.querySelector("#ky-cancel-btn");
     const selectBtn = content.querySelector("#ky-select-btn");
     const filterSelect = content.querySelector("#ky-filter-select");
+    const sortSelect = content.querySelector("#ky-sort-select");
+    const orderSelect = content.querySelector("#ky-order-select");
     const previewEl = content.querySelector("#ky-preview");
     const previewContentEl = content.querySelector("#ky-preview-content");
     const headerMetaEl = content.querySelector("#ky-header-meta");
@@ -426,6 +438,8 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
     let parentPath = ""; // 由后端 API 提供
     let selectedItemPath = null;
     let currentFilter = "all"; // 当前过滤类型
+    let currentSortKey = "name";
+    let currentSortOrder = "asc";
     let allFiles = []; // 存储所有文件，用于过滤
     let initialFilePath = filePathToPreview; // 存储初始文件路径，用于预览
     let renderedFiles = [];
@@ -619,7 +633,9 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
             }
         }
         const info = cached.info;
-    const sizeStr = typeof info?.size === "number" ? `${info.size} bytes` : "";
+    const mb = 1024*1024;
+    //如果字节数小于1024则不加单位，如果大于1024则用KB, 如果大于1024*1024则用MB
+    const sizeStr = typeof info?.size === "number" ? `${(info.size>mb?info.size/mb:info.size>1024?info.size/1024:info.size).toFixed(2)} ${info.size>mb?"MB":"KB"}` : "";
     if (headerMetaEl) headerMetaEl.textContent = `${file.name}${sizeStr ? ` • ${sizeStr}` : ""}`;
     if (downloadBtn) {
         if (info?.preview_url) {
@@ -696,6 +712,30 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
         
         // 根据当前过滤条件筛选文件
         const filteredFiles = allFiles.filter(file => shouldShowFile(file, currentFilter));
+
+        // 排序
+        const orderFactor = currentSortOrder === "desc" ? -1 : 1;
+        filteredFiles.sort((a, b) => {
+            if (a && a.name === "..") return -1;
+            if (b && b.name === "..") return 1;
+            const aDir = a && (a.type === "dir" || a.type === "drive");
+            const bDir = b && (b.type === "dir" || b.type === "drive");
+            if (aDir && !bDir) return -1;
+            if (!aDir && bDir) return 1;
+            if (currentSortKey === "name") {
+                const an = (a.name || "").toLowerCase();
+                const bn = (b.name || "").toLowerCase();
+                return an.localeCompare(bn) * orderFactor;
+            }
+            const av = typeof a[currentSortKey] === "number" ? a[currentSortKey] : 0;
+            const bv = typeof b[currentSortKey] === "number" ? b[currentSortKey] : 0;
+            if (av === bv) {
+                const an = (a.name || "").toLowerCase();
+                const bn = (b.name || "").toLowerCase();
+                return an.localeCompare(bn) * orderFactor;
+            }
+            return (av - bv) * orderFactor;
+        });
         renderedFiles = filteredFiles;
         
         filteredFiles.forEach((file, i) => {
@@ -713,31 +753,30 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
             el.dataset.index = String(i);
             
             el.onclick = () => {
-                // 如果是文件夹或驱动器，点击进入
-                // 如果是 ".." 也是进入
-                const isNavigable = file.type === "dir" || file.type === "drive";
-                
-                if (isNavigable && file.name !== "..") {
+                // ".." 保持为进入上级
+                if (file.name === "..") {
                     fetchPath(file.path);
-                } else if (file.name === "..") {
-                    // 使用后端返回的 parent_path 会更稳，但点击列表中 .. 时通常 file.path 已经是正确父路径
-                    fetchPath(file.path);
-                } else {
-                    // 选中文件
-                    document.querySelectorAll(".ky-file-item").forEach(i => i.classList.remove("selected"));
-                    el.classList.add("selected");
-                    selectedItemPath = file.path;
-                    pathInput.value = file.path;
-                    // 清除初始文件路径，因为用户已经手动选择了文件
-                    initialFilePath = null;
+                    return;
+                }
+                // 单击：文件与文件夹都可选中
+                document.querySelectorAll(".ky-file-item").forEach(i => i.classList.remove("selected"));
+                el.classList.add("selected");
+                selectedItemPath = file.path;
+                pathInput.value = file.path;
+                initialFilePath = null;
+                if (file.type === "file") {
                     updatePreview(file);
+                } else {
+                    clearPreview();
                 }
             };
-            if (file.type === "file") {
-                el.ondblclick = () => {
+            el.ondblclick = () => {
+                if (file.type === "file") {
                     finalizeSelection(file.path);
-                };
-            }
+                } else if (file.type === "dir" || file.type === "drive" || file.name === "..") {
+                    fetchPath(file.path);
+                }
+            };
             
             fileListEl.appendChild(el);
         });
@@ -776,6 +815,69 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
         currentFilter = filterSelect.value;
         applyFilter();
     };
+
+    sortSelect.onchange = () => {
+        currentSortKey = sortSelect.value;
+        applyFilter();
+    };
+
+    orderSelect.onchange = () => {
+        currentSortOrder = orderSelect.value;
+        applyFilter();
+    };
+
+    async function deleteSelected() {
+        try {
+            if (!currentDialog || !document.body.contains(currentDialog)) return;
+            if (!selectedItemPath) return;
+            const target = renderedFiles.find(f => f.path === selectedItemPath);
+            if (!target) return;
+            if (target.name === "..") return;
+            if (target.type === "drive") return;
+            if (target.type === "dir") {
+                const ok = confirm(`Delete folder "${target.name}"? This cannot be undone.`);
+                if (!ok) return;
+            }
+            const resp = await api.fetchApi("/ky_utils/delete", {
+                method: "DELETE",
+                body: JSON.stringify({ path: target.path })
+            });
+            const data = await resp.json();
+            if (data && data.ok) {
+                const startIdx = renderedFiles.findIndex(f => f.path === selectedItemPath);
+                const wasFile = target.type === "file";
+                allFiles = allFiles.filter(f => f.path !== target.path);
+                selectedItemPath = null;
+                applyFilter();
+                if (wasFile && renderedFiles && renderedFiles.length > 0) {
+                    let anchor = startIdx;
+                    if (anchor < 0) anchor = findFirstFileIndex();
+                    if (anchor > renderedFiles.length - 1) anchor = renderedFiles.length - 1;
+                    const candidate = renderedFiles[anchor];
+                    if (candidate && candidate.type === "file") {
+                        selectFileAndPreview(candidate);
+                    } else {
+                        let nextIdx = findNextFileIndex(anchor, 1);
+                        if (renderedFiles[nextIdx] && renderedFiles[nextIdx].type === "file") {
+                            selectFileAndPreview(renderedFiles[nextIdx]);
+                        } else {
+                            nextIdx = findNextFileIndex(anchor, -1);
+                            if (renderedFiles[nextIdx] && renderedFiles[nextIdx].type === "file") {
+                                selectFileAndPreview(renderedFiles[nextIdx]);
+                            } else {
+                                clearPreview();
+                                if (headerMetaEl) headerMetaEl.textContent = "";
+                            }
+                        }
+                    }
+                }
+            } else {
+                alert(`Delete failed: ${data?.error || "Unknown error"}`);
+            }
+        } catch (err) {
+            alert(`Delete failed: ${err?.message || err}`);
+        }
+    }
 
     // 添加键盘事件监听器，只在对话框打开时有效
     const keyHandler = (e) => {
@@ -820,6 +922,10 @@ function showFileBrowser(initialPath, onSelect, filePathToPreview = null, dirWid
             e.stopPropagation();
             const idx = findLastFileIndex();
             selectFileAndPreview(renderedFiles[idx]);
+        } else if (e.key === "Delete") {
+            e.preventDefault();
+            e.stopPropagation();
+            deleteSelected();
         }
     };
     
@@ -838,6 +944,7 @@ function clearPreview() {
     const previewContentEl = document.querySelector("#ky-preview-content");
     if (previewContentEl) previewContentEl.innerHTML = "";
 }
+
 
 //
 
