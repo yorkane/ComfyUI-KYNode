@@ -1,6 +1,6 @@
 [project]
 name = "comfyui-kynode"
-description = "NODES:Advanced Lying Sigma Sampler, Save Image To target Path"
+description = "NODES:Kevin nodes’, Image and Video utils"
 version = "1.0.0"
 license = {file = "LICENSE"}
 
