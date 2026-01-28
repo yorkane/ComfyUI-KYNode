@@ -4,8 +4,37 @@ from PIL import Image
 import folder_paths
 import os
 import json
+import urllib.parse
 
 _CATEGORY = 'KYNode/video'
+
+def get_ky_url(path):
+    if not path:
+        return ""
+    filename = os.path.basename(path)
+    fullpath_encoded = urllib.parse.quote(path.replace('\\', '/'))
+    return f"/ky_utils/stream/{filename}?path={fullpath_encoded}"
+
+def resolve_path(filename, subfolder="", type_="input"):
+    try:
+        # handle special subfolder names if they come from the weird ComfyUI logic
+        if subfolder == 'input' or subfolder == 'output' or subfolder == 'temp':
+            subfolder = ""
+            
+        base_dir = folder_paths.get_directory_by_type(type_)
+        if not base_dir:
+            return ""
+            
+        # If subfolder is not empty, join it
+        if subfolder:
+            full_path = os.path.join(base_dir, subfolder, filename)
+        else:
+            full_path = os.path.join(base_dir, filename)
+            
+        return os.path.abspath(full_path)
+    except Exception as e:
+        print(f"Error resolving path: {e}")
+        return ""
 
 
 def process_video_object(video_obj):
@@ -27,72 +56,86 @@ def process_video_object(video_obj):
         file_attr = getattr(video_obj, '_VideoFromFile__file', None)            
         # 如果是字符串路径
         if isinstance(file_attr, str):
+            # It might be a relative path or just a filename depending on how it was created
+            # Usually ComfyUI internally stores relative path or filename for input directory
+            # Let's try to resolve it.
+            
+            # Check if it has input/output/temp in path to guess type
             filename = os.path.basename(file_attr)
             subfolder = os.path.dirname(file_attr)
-            # 尝试确定文件类型
+            
             if 'input' in file_attr:
                 type_ = 'input'
             elif 'output' in file_attr:
                 type_ = 'output'
             else:
-                type_ = 'input'  # 默认为input
-            source = f"/api/view?type={type_}&filename={filename}&subfolder={subfolder}"
-            return source
+                type_ = 'input'  # default
+
+            # If absolute path, use it directly
+            if os.path.isabs(file_attr) and os.path.exists(file_attr):
+                return get_ky_url(file_attr)
+
+            full_path = resolve_path(filename, subfolder, type_)
+            if os.path.exists(full_path):
+                return get_ky_url(full_path)
+            
+            # fallback if resolution failed but it might be a direct path
+            return get_ky_url(file_attr)
+
         # 如果是BytesIO对象，我们无法直接获取文件名
         elif hasattr(file_attr, 'name'):
             # BytesIO可能有name属性
-            filename = os.path.basename(getattr(file_attr, 'name', 'unknown.mp4'))
-            source = f"/api/view?filename={filename}&type=input"
-            return source
+            # Warning: this might be a temporary file that doesn't exist on disk in a standard location
+            filename = getattr(file_attr, 'name', 'unknown.mp4')
+            if os.path.isabs(filename):
+                return get_ky_url(filename)
+            # Try to find it in input
+            full_path = resolve_path(os.path.basename(filename), "", "input")
+            return get_ky_url(full_path)
         else:
             # 其他情况，转换为字符串
             source = str(file_attr)
+            if os.path.exists(source):
+                return get_ky_url(source)
             return source
     
-    # 处理其他可能的属性
-    if hasattr(video_obj, 'filename'):
-        filename = getattr(video_obj, 'filename', '')
-        subfolder = getattr(video_obj, 'subfolder', '')
-        type_ = getattr(video_obj, 'type', 'input')
-        source = f"/api/view?type={type_}&filename={filename}&subfolder={subfolder}"
-        return source
+    # helper to extract fields
+    def get_info(obj):
+        fname = getattr(obj, 'filename', None) or obj.get('filename') if isinstance(obj, dict) else None
+        sub = getattr(obj, 'subfolder', None) or obj.get('subfolder', "") if isinstance(obj, dict) else ""
+        typ = getattr(obj, 'type', None) or obj.get('type', "input") if isinstance(obj, dict) else "input"
+        path = getattr(obj, 'path', None) or obj.get('path', None) if isinstance(obj, dict) else None
+        return fname, sub, typ, path
+
+    fname, sub, typ, path = get_info(video_obj)
+
+    if path:
+        return get_ky_url(path)
     
-    if isinstance(video_obj, dict):
-        # 检查常见的键
-        if "filename" in video_obj:
-            filename = video_obj["filename"]
-            subfolder = video_obj.get("subfolder", "")
-            type_ = video_obj.get("type", "input")
-            source = f"/api/view?type={type_}&filename={filename}&subfolder={subfolder}"
-            return source
-        elif "path" in video_obj:
-            path = video_obj["path"]
-            filename = os.path.basename(path)
-            subfolder = os.path.dirname(path)
-            source = f"/api/view?filename={filename}&subfolder={subfolder}&type=input"
-            return source
-        else:
-            # 尝试其他可能的键
-            source = str(video_obj)
-            return source
-    elif isinstance(video_obj, str):
+    if fname:
+        full_path = resolve_path(fname, sub, typ)
+        return get_ky_url(full_path)
+
+    if isinstance(video_obj, str):
         if os.path.exists(video_obj):
-            filename = os.path.basename(video_obj)
-            subfolder = os.path.dirname(video_obj)
-            source = f"/api/view?filename={filename}&subfolder={subfolder}&type=input"
-            return source
+            return get_ky_url(video_obj)
         else:
-            source = video_obj
-            return source
-    else:
-        # 其他类型，尝试转换为字符串并检查是否包含有用信息
-        source = str(video_obj)
-        
-        # 如果字符串中包含filename信息，尝试提取
-        if 'filename=' in source and 'type=' in source:
-            return source
-        else:
-            return source
+            # check if it looks like a relative path in input
+            full_path = resolve_path(os.path.basename(video_obj), os.path.dirname(video_obj), "input")
+            if os.path.exists(full_path):
+                 return get_ky_url(full_path)
+            return video_obj
+
+    # fallback
+    source = str(video_obj)
+    # check if it already has filename/type info from some string representation
+    if 'filename=' in source and 'type=' in source:
+        # It's an API View URL probably, we can't easily convert it back without parsing
+        # But if the user wants to use ky_utils, we should try.
+        # But for safety, maybe just return it if we can't parse?
+        # Let's leave it for now.
+        return source
+    return source
 
 
 class VideoCompareNode:
@@ -241,39 +284,11 @@ class KY_ToVideoUrl:
             
             if match:
                 video_path = match.group(1)
-                # 如果是文件路径，转换为API视图URL
                 if os.path.exists(video_path):
-                    filename = os.path.basename(video_path)
-                    # 获取相对于ComfyUI目录的子目录
-                    try:
-                        # 获取ComfyUI根目录
-                        comfyui_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                        # 计算相对路径
-                        relative_path = os.path.relpath(video_path, comfyui_root)
-                        subfolder = os.path.dirname(relative_path).replace('\\', '/')
-                        # 从路径中确定type
-                        path_parts = relative_path.split(os.sep)
-                        if 'temp' in path_parts:
-                            type_ = 'temp'
-                        elif 'input' in path_parts:
-                            type_ = 'input'
-                        elif 'output' in path_parts:
-                            type_ = 'output'
-                        else:
-                            type_ = 'input'  # 默认值
-                    except:
-                        # 如果计算相对路径失败，使用原来的逻辑
-                        subfolder = os.path.dirname(video_path).replace('\\', '/')
-                        type_ = 'input'
-                    if subfolder == 'input' or subfolder == 'output' or subfolder == 'temp':
-                        subfolder = ''
-                    # 构建完整的URL参数
-                    import urllib.parse
-                    fullpath_encoded = urllib.parse.quote(video_path.replace('\\', '/'))
-                    return f"/api/view?filename={filename}&subfolder={subfolder}&type={type_}&format=video%2Fh264-mp4&fullpath={fullpath_encoded}"
+                    return get_ky_url(video_path)
             
-            # 如果已经是API视图URL，直接返回
-            if '/api/view' in s and ('filename=' in s or 'type=' in s):
+            # 如果已经是API视图URL，尝试转换 (Optional, but good for compatibility if input is already a view url)
+            if '/ky_utils/stream' in s:
                 return s
             
             # 尝试从JSON字符串中提取信息
@@ -281,47 +296,24 @@ class KY_ToVideoUrl:
                 try:
                     data = json.loads(s)
                     if isinstance(data, dict):
-                        if "filename" in data:
-                            filename = data["filename"]
-                            subfolder = data.get("subfolder", "")
-                            type_ = data.get("type", "input")
-                            return f"/api/view?type={type_}&filename={filename}&subfolder={subfolder}"
-                        elif "path" in data:
-                            path = data["path"]
-                            filename = os.path.basename(path)
-                            subfolder = os.path.dirname(path)
-                            return f"/api/view?filename={filename}&subfolder={subfolder}&type=input"
+                        # try to get absolute path
+                        fname = data.get("filename")
+                        sub = data.get("subfolder", "")
+                        typ = data.get("type", "input")
+                        path = data.get("path")
+                        
+                        if path and os.path.exists(path):
+                            return get_ky_url(path)
+                        if fname:
+                            full_path = resolve_path(fname, sub, typ)
+                            if os.path.exists(full_path):
+                                return get_ky_url(full_path)
                 except:
                     pass
             
-            # 如果是文件路径，转换为API视图URL
+            # 如果是文件路径
             if os.path.exists(s):
-                filename = os.path.basename(s)
-                try:
-                    # 获取ComfyUI根目录
-                    comfyui_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                    # 计算相对路径
-                    relative_path = os.path.relpath(s, comfyui_root)
-                    subfolder = os.path.dirname(relative_path).replace('\\', '/')
-                    # 从路径中确定type
-                    path_parts = relative_path.split(os.sep)
-                    if 'temp' in path_parts:
-                        type_ = 'temp'
-                    elif 'input' in path_parts:
-                        type_ = 'input'
-                    elif 'output' in path_parts:
-                        type_ = 'output'
-                    else:
-                        type_ = 'input'  # 默认值
-                except:
-                    # 如果计算相对路径失败，使用原来的逻辑
-                    subfolder = os.path.dirname(s).replace('\\', '/')
-                    type_ = 'input'
-                
-                # 构建完整的URL参数
-                import urllib.parse
-                fullpath_encoded = urllib.parse.quote(s.replace('\\', '/'))
-                return f"/api/view?filename={filename}&subfolder={subfolder}&type={type_}&format=video%2Fh264-mp4&fullpath={fullpath_encoded}"
+                return get_ky_url(s)
             
             # 否则返回原字符串
             return s
@@ -394,40 +386,42 @@ def save_image_to_output(img, name_prefix="img"):
         Image.fromarray(_to_uint8_rgb(arr)).save(fullpath)
     else:
         return ""
-    return f"/api/view?filename={filename}&type=output&subfolder={subfolder}"
+    return get_ky_url(fullpath)
 
 def process_image_object(image_obj):
     if image_obj is None:
         return ""
-    # if has typical attributes
-    if hasattr(image_obj, 'filename'):
-        filename = getattr(image_obj, 'filename', '')
-        subfolder = getattr(image_obj, 'subfolder', '')
-        type_ = getattr(image_obj, 'type', 'input')
-        return f"/api/view?type={type_}&filename={filename}&subfolder={subfolder}"
+    
+    # helper to check dict
+    fname = getattr(image_obj, 'filename', None) or image_obj.get('filename') if isinstance(image_obj, dict) else None
+    sub = getattr(image_obj, 'subfolder', None) or image_obj.get('subfolder', "") if isinstance(image_obj, dict) else ""
+    typ = getattr(image_obj, 'type', None) or image_obj.get('type', "input") if isinstance(image_obj, dict) else "input"
+    path = getattr(image_obj, 'path', None) or image_obj.get('path', None) if isinstance(image_obj, dict) else None
+
+    if path:
+        return get_ky_url(path)
+
+    if fname:
+        full_path = resolve_path(fname, sub, typ)
+        return get_ky_url(full_path)
+
     if isinstance(image_obj, dict):
-        if "filename" in image_obj:
-            filename = image_obj["filename"]
-            subfolder = image_obj.get("subfolder", "")
-            type_ = image_obj.get("type", "input")
-            return f"/api/view?type={type_}&filename={filename}&subfolder={subfolder}"
-        if "path" in image_obj:
-            path = image_obj["path"]
-            filename = os.path.basename(path)
-            subfolder = os.path.dirname(path)
-            return f"/api/view?filename={filename}&subfolder={subfolder}&type=input"
         if "image" in image_obj:
             return save_image_to_output(image_obj["image"])
         if "images" in image_obj:
             imgs = image_obj["images"]
             if isinstance(imgs, (list, tuple)) and imgs:
                 return save_image_to_output(imgs[0])
+                
     if isinstance(image_obj, str):
         if os.path.exists(image_obj):
-            filename = os.path.basename(image_obj)
-            subfolder = os.path.dirname(image_obj)
-            return f"/api/view?filename={filename}&subfolder={subfolder}&type=input"
+            return get_ky_url(image_obj)
+        # Try resolving as input file
+        full_path = resolve_path(os.path.basename(image_obj), os.path.dirname(image_obj), "input")
+        if os.path.exists(full_path):
+            return get_ky_url(full_path)
         return image_obj
+        
     # save arbitrary object to output and return view url
     return save_image_to_output(image_obj)
 

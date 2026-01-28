@@ -1,6 +1,5 @@
 // 用于实现视频对比的JavaScript代码
 import { app } from "/scripts/app.js";
-import { api } from "/scripts/api.js";
 
 // 注册节点扩展
 app.registerExtension({
@@ -113,9 +112,10 @@ function ensureVCStyle() {
     .ky-vc-btn{padding:5px 12px;background:var(--comfy-input-bg);border:1px solid var(--border-color);color:var(--fg-color);border-radius:4px;cursor:pointer}
     .ky-vc-btn.primary{background:var(--p-700);color:#fff}
     .ky-vc-body{flex:1;padding:0}
-    #ky-vc-container{position:relative;width:100%;height:100%;line-height:0;background:#000}
-    #ky-vc-container>video{position:absolute;top:0;left:0;background:#000}
-    #ky-vc-container>img{position:absolute;top:0;left:0;background:#000}
+    #ky-vc-container{position:relative;width:100%;height:100%;line-height:0;background:#000;overflow:hidden}
+    .ky-vc-zoom-layer{position:absolute;top:0;left:0;width:100%;height:100%;transform-origin:0 0;will-change:transform}
+    #ky-vc-container>div>video{position:absolute;top:0;left:0;background:#000}
+    #ky-vc-container>div>img{position:absolute;top:0;left:0;background:#000}
     #ky-vc-clipper{width:50%;position:absolute;top:0;bottom:0;overflow:hidden;border-right:1px dashed #ccc}
     #ky-vc-clipper video{position:absolute;top:0;left:0;background:#000}
     #ky-vc-clipper img{position:absolute;top:0;left:0;background:#000}
@@ -143,13 +143,15 @@ function openCompareDialog(a, b) {
         </div>
         <div class="ky-vc-body">
             <div id="ky-vc-container">
-                <video loop autoplay muted>
-                    <source id="ky-vc-a-src">
-                </video>
-                <div id="ky-vc-clipper">
-                    <video loop autoplay muted style="width:200%;z-index:3;">
-                        <source id="ky-vc-b-src">
+                <div class="ky-vc-zoom-layer">
+                    <video loop autoplay muted>
+                        <source id="ky-vc-a-src">
                     </video>
+                    <div id="ky-vc-clipper">
+                        <video loop autoplay muted style="width:200%;z-index:3;">
+                            <source id="ky-vc-b-src">
+                        </video>
+                    </div>
                 </div>
             </div>
         </div>
@@ -164,6 +166,8 @@ function openCompareDialog(a, b) {
     const clipper = content.querySelector('#ky-vc-clipper');
     const vA = vContainer.getElementsByTagName('video')[0];
     const vB = clipper.getElementsByTagName('video')[0];
+    const zoomLayer = vContainer.querySelector('.ky-vc-zoom-layer');
+
     function toStr(x){return (Array.isArray(x)?x.join(''):x||"").toString();}
     inpA.value = toStr(a);
     inpB.value = toStr(b);
@@ -171,7 +175,18 @@ function openCompareDialog(a, b) {
     bSrc.src = toStr(b);
     vA.load();
     vB.load();
-    function track(e){const rect=vContainer.getBoundingClientRect();const pos=(e.pageX-rect.left)/vContainer.offsetWidth*100;if(pos<=100){clipper.style.width=pos+"%";vB.style.zIndex=3;}}
+
+    let scale = 1, panX = 0, panY = 0, isDragging = false, lastX = 0, lastY = 0;
+    function updateTransform() { zoomLayer.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`; }
+
+    function track(e){
+        if (isDragging) return;
+        const rect=zoomLayer.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const pos=(clientX-rect.left)/rect.width*100;
+        if(pos>=0 && pos<=100){clipper.style.width=pos+"%";vB.style.zIndex=3;}
+    }
+
     function layout(){
         const cw = vContainer.clientWidth; const ch = vContainer.clientHeight;
         const aw = vA.videoWidth||1920; const ah = vA.videoHeight||1080;
@@ -185,7 +200,49 @@ function openCompareDialog(a, b) {
     vA.addEventListener('loadedmetadata', onMeta);
     vB.addEventListener('loadedmetadata', onMeta);
     window.addEventListener('resize', layout);
-    vContainer.addEventListener('mousemove',track,false);
+
+    vContainer.addEventListener('mousemove', (e) => {
+        if (isDragging) {
+            const dx = e.clientX - lastX;
+            const dy = e.clientY - lastY;
+            lastX = e.clientX;
+            lastY = e.clientY;
+            panX += dx;
+            panY += dy;
+            updateTransform();
+        } else {
+            track(e);
+        }
+    });
+    vContainer.addEventListener('mousedown', (e) => {
+        if (e.button === 2) {
+            isDragging = true;
+            lastX = e.clientX;
+            lastY = e.clientY;
+            e.preventDefault();
+        }
+    });
+    vContainer.addEventListener('mouseup', () => { isDragging = false; });
+    vContainer.addEventListener('contextmenu', e => e.preventDefault());
+    vContainer.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const zoomSpeed = 0.1;
+        const oldScale = scale;
+        if (e.deltaY < 0) scale *= (1 + zoomSpeed);
+        else scale /= (1 + zoomSpeed);
+        scale = Math.max(0.1, Math.min(scale, 10));
+        
+        const rect = vContainer.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        const rx = (mx - panX) / oldScale;
+        const ry = (my - panY) / oldScale;
+        panX = mx - rx * scale;
+        panY = my - ry * scale;
+        updateTransform();
+    }, { passive: false });
+
+    // Touch support for slider (basic)
     vContainer.addEventListener('touchstart',track,false);
     vContainer.addEventListener('touchmove',track,false);
     function sync(){if(vA.paused&&vB.paused)return;const d=Math.abs(vA.currentTime-vB.currentTime);if(d>0.1){vB.currentTime=vA.currentTime;}}
@@ -273,9 +330,11 @@ function openImageCompareDialog(a, b){
         </div>
         <div class="ky-vc-body">
             <div id="ky-vc-container">
-                <img id="ky-ic-a">
-                <div id="ky-vc-clipper">
-                    <img id="ky-ic-b" style="z-index:3;">
+                <div class="ky-vc-zoom-layer">
+                    <img id="ky-ic-a">
+                    <div id="ky-vc-clipper">
+                        <img id="ky-ic-b" style="z-index:3;">
+                    </div>
                 </div>
             </div>
         </div>
@@ -293,7 +352,19 @@ function openImageCompareDialog(a, b){
     inpB.value = toStr(b);
     imgA.src = toStr(a);
     imgB.src = toStr(b);
-    function track(e){const rect=vContainer.getBoundingClientRect();const pos=(e.pageX-rect.left)/vContainer.offsetWidth*100;if(pos<=100){clipper.style.width=pos+"%";imgB.style.zIndex=3;}}
+
+    let scale = 1, panX = 0, panY = 0, isDragging = false, lastX = 0, lastY = 0;
+    const zoomLayer = vContainer.querySelector('.ky-vc-zoom-layer');
+    function updateTransform() { zoomLayer.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`; }
+
+    function track(e){
+        if(isDragging) return;
+        const rect=zoomLayer.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const pos=(clientX-rect.left)/rect.width*100;
+        if(pos>=0 && pos<=100){clipper.style.width=pos+"%";imgB.style.zIndex=3;}
+    }
+
     function layout(){
         const cw = vContainer.clientWidth; const ch = vContainer.clientHeight;
         const aw = imgA.naturalWidth||1024; const ah = imgA.naturalHeight||768;
@@ -306,7 +377,49 @@ function openImageCompareDialog(a, b){
     imgA.addEventListener('load', layout);
     imgB.addEventListener('load', layout);
     window.addEventListener('resize', layout);
-    vContainer.addEventListener('mousemove',track,false);
+
+    vContainer.addEventListener('mousemove', (e) => {
+        if (isDragging) {
+            const dx = e.clientX - lastX;
+            const dy = e.clientY - lastY;
+            lastX = e.clientX;
+            lastY = e.clientY;
+            panX += dx;
+            panY += dy;
+            updateTransform();
+        } else {
+            track(e);
+        }
+    });
+    vContainer.addEventListener('mousedown', (e) => {
+        if (e.button === 2) {
+            isDragging = true;
+            lastX = e.clientX;
+            lastY = e.clientY;
+            e.preventDefault();
+        }
+    });
+    vContainer.addEventListener('mouseup', () => { isDragging = false; });
+    vContainer.addEventListener('contextmenu', e => e.preventDefault());
+    vContainer.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const zoomSpeed = 0.1;
+        const oldScale = scale;
+        if (e.deltaY < 0) scale *= (1 + zoomSpeed);
+        else scale /= (1 + zoomSpeed);
+        scale = Math.max(0.1, Math.min(scale, 10));
+        
+        const rect = vContainer.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        const rx = (mx - panX) / oldScale;
+        const ry = (my - panY) / oldScale;
+        panX = mx - rx * scale;
+        panY = my - ry * scale;
+        updateTransform();
+    }, { passive: false });
+
+    // Touch support (basic)
     vContainer.addEventListener('touchstart',track,false);
     vContainer.addEventListener('touchmove',track,false);
     content.querySelector('#ky-vc-reload').addEventListener('click',()=>{imgA.src=inpA.value;imgB.src=inpB.value;});

@@ -1,145 +1,241 @@
-<html><head>
-  <meta charset="UTF-8">
+<html>
+  <head>
+    <meta charset="UTF-8" />
     <title>Video Compare</title>
-<style>
-body {
-  background: #333;
-  margin: 4px;
-}
-#video-compare-container {
-  display: inline-block;
-  line-height: 0;
-  position: relative;
-  width: 100%;
-  padding-top: 42.3%;
-}
-#video-compare-container > video {
-  width: 100%;
-  position: absolute;
-  top: 0; height: 100%;
-}
-#video-clipper {
-  width: 50%; position: absolute;
-  top: 0; bottom: 0;
-  overflow: hidden;
-  border-right: 1px dashed #ccc;
-}
-#video-clipper video {
-  width: 200%;
-  position: absolute;
-  height: 100%;
-}
-#title1 {
-    color: #ccc;
-    float: right;
-}
-#title2 { 
-    color: #ccc;
-    float: left;
-}
-.controls {
-  margin: 5px 0;
-  text-align: center;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.controls button {
-  padding: 5px;
-  background: #444;
-  color: white;
-  border: 1px solid #666;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.controls button:hover {
-  background: #555;
-}
-.controls input {
-  padding: 4px;
-  flex: 1;
-  max-width: 49%;
-}
-</style>
-  
-</head>
+    <style>
+      body {
+        background: #333;
+        margin: 4px;
+      }
+      #video-compare-container {
+        display: inline-block;
+        line-height: 0;
+        position: relative;
+        width: 100%;
+        padding-top: 42.3%;
+        overflow: hidden;
+      }
+      .zoom-layer {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        transform-origin: 0 0;
+        will-change: transform;
+      }
+      #video-compare-container > div > video {
+        width: 100%;
+        position: absolute;
+        top: 0;
+        height: 100%;
+      }
+      #video-clipper {
+        width: 50%;
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        overflow: hidden;
+        border-right: 1px dashed #ccc;
+      }
+      #video-clipper video {
+        width: 200%;
+        position: absolute;
+        height: 100%;
+      }
+      #title1 {
+        color: #ccc;
+        float: right;
+      }
+      #title2 {
+        color: #ccc;
+        float: left;
+      }
+      .controls {
+        margin: 5px 0;
+        text-align: center;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .controls button {
+        padding: 5px;
+        background: #444;
+        color: white;
+        border: 1px solid #666;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .controls button:hover {
+        background: #555;
+      }
+      .controls input {
+        padding: 4px;
+        flex: 1;
+        max-width: 49%;
+      }
+    </style>
+  </head>
 
-<body translate="no">
-  <div class="controls">
-    <button id="reload-btn">Reload</button>
-    <input type="text" id="videoA-url" placeholder="Video A URL" value="https://s3-us-west-2.amazonaws.com/s.cdpn.io/4273/floodplain-dirty.mp4">
-    <input type="text" id="videoB-url" placeholder="Video B URL" value="https://s3-us-west-2.amazonaws.com/s.cdpn.io/4273/floodplain-clean.mp4">
-  </div>
-  
-  <div id="video-compare-container">
-  <video loop="" autoplay="" muted="">
-    <source src="https://s3-us-west-2.amazonaws.com/s.cdpn.io/4273/floodplain-dirty.mp4">
-  </video>
- <div id="video-clipper">
-    <video loop="" autoplay="" muted="" style="width: 200%; z-index: 3;">
-      <source src="https://s3-us-west-2.amazonaws.com/s.cdpn.io/4273/floodplain-clean.mp4">
-    </video>
-  </div>
-	</div>
-      <script id="rendered-js">
-function trackLocation(e) {
-  var rect = videoContainer.getBoundingClientRect(),
-  position = (e.pageX - rect.left) / videoContainer.offsetWidth * 100;
-  if (position <= 100) {
-    videoClipper.style.width = position + "%";
-    clippedVideo.style.width = 100 / position * 100 + "%";
-    clippedVideo.style.zIndex = 3;
-  }
-}
+  <body translate="no">
+    <div class="controls">
+      <button id="reload-btn">Reload</button>
+      <input
+        type="text"
+        id="videoA-url"
+        placeholder="Video A URL"
+        value="https://s3-us-west-2.amazonaws.com/s.cdpn.io/4273/floodplain-dirty.mp4"
+      />
+      <input
+        type="text"
+        id="videoB-url"
+        placeholder="Video B URL"
+        value="https://s3-us-west-2.amazonaws.com/s.cdpn.io/4273/floodplain-clean.mp4"
+      />
+    </div>
 
-function reloadVideos() {
-  var videoAUrl = document.getElementById('videoA-url').value;
-  var videoBUrl = document.getElementById('videoB-url').value;
-  
-  var videoContainer = document.getElementById("video-compare-container");
-  var videoA = videoContainer.getElementsByTagName("video")[0];
-  var videoB = clippedVideo;
-  
-  videoA.getElementsByTagName('source')[0].src = videoAUrl;
-  videoB.getElementsByTagName('source')[0].src = videoBUrl;
-  
-  videoA.load();
-  videoB.load();
-}
+    <div id="video-compare-container">
+      <div id="zoom-layer" class="zoom-layer">
+        <video loop="" autoplay="" muted="">
+          <source
+            src="https://s3-us-west-2.amazonaws.com/s.cdpn.io/4273/floodplain-dirty.mp4"
+          />
+        </video>
+        <div id="video-clipper">
+          <video loop="" autoplay="" muted="" style="width: 200%; z-index: 3">
+            <source
+              src="https://s3-us-west-2.amazonaws.com/s.cdpn.io/4273/floodplain-clean.mp4"
+            />
+          </video>
+        </div>
+      </div>
+    </div>
+    <script id="rendered-js">
+      var videoContainer = document.getElementById("video-compare-container"),
+        zoomLayer = document.getElementById("zoom-layer"),
+        videoClipper = document.getElementById("video-clipper"),
+        clippedVideo = videoClipper.getElementsByTagName("video")[0];
 
-var videoContainer = document.getElementById("video-compare-container"),
-videoClipper = document.getElementById("video-clipper"),
-clippedVideo = videoClipper.getElementsByTagName("video")[0];
-videoContainer.addEventListener("mousemove", trackLocation, false);
-videoContainer.addEventListener("touchstart", trackLocation, false);
-videoContainer.addEventListener("touchmove", trackLocation, false);
-var videoA = videoContainer.getElementsByTagName("video")[0];
-var videoB = clippedVideo
+      var videoA = videoContainer.getElementsByTagName("video")[0];
+      var videoB = clippedVideo;
 
-document.getElementById('reload-btn').addEventListener('click', reloadVideos);
-        // 视频加载完成后同步播放
-        videoA.addEventListener('loadeddata', function() {
-            if (videoB.readyState >= 3) {
-                videoA.play();
-                videoB.play();
-            }
-        });
-        videoB.addEventListener('loadeddata', function() {
-            if (videoA.readyState >= 3) {
-                videoA.play();
-                videoB.play();
-            }
-        });
-        // 处理视频播放同步
-        function syncVideos() {
-            if (videoA.paused && videoB.paused) return;
-            
-            const diff = Math.abs(videoA.currentTime - videoB.currentTime);
-            if (diff > 0.1) {
-                // 同步视频时间
-                videoB.currentTime = videoA.currentTime;
-            }
+      function reloadVideos() {
+        var videoAUrl = document.getElementById('videoA-url').value;
+        var videoBUrl = document.getElementById('videoB-url').value;
+
+        var videoContainer = document.getElementById("video-compare-container");
+        var videoA = videoContainer.getElementsByTagName("video")[0];
+        var videoB = clippedVideo;
+
+        videoA.getElementsByTagName('source')[0].src = videoAUrl;
+        videoB.getElementsByTagName('source')[0].src = videoBUrl;
+
+        videoA.load();
+        videoB.load();
+      }
+
+      let scale = 1,
+        panX = 0,
+        panY = 0,
+        isDragging = false,
+        lastX = 0,
+        lastY = 0;
+
+      function updateTransform() {
+        zoomLayer.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+      }
+
+      function trackLocation(e) {
+        if (isDragging) return;
+        var rect = zoomLayer.getBoundingClientRect(),
+          clientX = e.touches ? e.touches[0].clientX : e.clientX,
+          position = ((clientX - rect.left) / rect.width) * 100;
+        if (position >= 0 && position <= 100) {
+          videoClipper.style.width = position + "%";
+          clippedVideo.style.width = (100 / position) * 100 + "%";
+          clippedVideo.style.zIndex = 3;
         }
-        // 定期同步视频
-        setInterval(syncVideos, 100);
-</script></body></html>
+      }
+
+      videoContainer.addEventListener("mousemove", (e) => {
+        if (isDragging) {
+          const dx = e.clientX - lastX;
+          const dy = e.clientY - lastY;
+          lastX = e.clientX;
+          lastY = e.clientY;
+          panX += dx;
+          panY += dy;
+          updateTransform();
+        } else {
+          trackLocation(e);
+        }
+      });
+      videoContainer.addEventListener("touchstart", trackLocation, false);
+      videoContainer.addEventListener("touchmove", trackLocation, false);
+
+      videoContainer.addEventListener("mousedown", (e) => {
+        if (e.button === 2) {
+          // Right click
+          isDragging = true;
+          lastX = e.clientX;
+          lastY = e.clientY;
+          e.preventDefault();
+        }
+      });
+      videoContainer.addEventListener("mouseup", () => {
+        isDragging = false;
+      });
+      videoContainer.addEventListener("contextmenu", (e) => e.preventDefault());
+      videoContainer.addEventListener(
+        "wheel",
+        (e) => {
+          e.preventDefault();
+          const zoomSpeed = 0.1;
+          const oldScale = scale;
+          if (e.deltaY < 0) scale *= 1 + zoomSpeed;
+          else scale /= 1 + zoomSpeed;
+          scale = Math.max(0.1, Math.min(scale, 10));
+
+          const rect = videoContainer.getBoundingClientRect();
+          const mx = e.clientX - rect.left;
+          const my = e.clientY - rect.top;
+          const rx = (mx - panX) / oldScale;
+          const ry = (my - panY) / oldScale;
+          panX = mx - rx * scale;
+          panY = my - ry * scale;
+          updateTransform();
+        },
+        { passive: false },
+      );
+
+      document
+        .getElementById("reload-btn")
+        .addEventListener("click", reloadVideos);
+      // 视频加载完成后同步播放
+      videoA.addEventListener("loadeddata", function () {
+        if (videoB.readyState >= 3) {
+          videoA.play();
+          videoB.play();
+        }
+      });
+      videoB.addEventListener("loadeddata", function () {
+        if (videoA.readyState >= 3) {
+          videoA.play();
+          videoB.play();
+        }
+      });
+      // 处理视频播放同步
+      function syncVideos() {
+        if (videoA.paused && videoB.paused) return;
+
+        const diff = Math.abs(videoA.currentTime - videoB.currentTime);
+        if (diff > 0.1) {
+          // 同步视频时间
+          videoB.currentTime = videoA.currentTime;
+        }
+      }
+      // 定期同步视频
+      setInterval(syncVideos, 100);
+    </script>
+  </body>
+</html>

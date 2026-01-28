@@ -1,5 +1,4 @@
 import { app } from "../../scripts/app.js";
-import { api } from "../../scripts/api.js";
 
 // Constants
 const MAX_CHAR_VARNAME = 50;
@@ -319,7 +318,8 @@ app.registerExtension({
   name: "KYNode.KY_Eval_Python",
     async setup() {
         // 🔥 监听后端事件
-        app.socket.on("python_editor_error", (data) => {
+        if (app.socket) {
+            app.socket.on("python_editor_error", (data) => {
             console.log("收到错误事件:", data);
 
             // 获取当前所有节点，找到我们自定义的那个
@@ -333,6 +333,9 @@ app.registerExtension({
                 }
             }
         });
+        } else {
+             console.warn("[KY_Eval_Python] app.socket undefined during setup");
+        }
     },
   getCustomWidgets(app) {
     return {
