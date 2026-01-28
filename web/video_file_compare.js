@@ -200,6 +200,8 @@ function openCompareDialog(a, b) {
     function onMeta(){layout();}
     vA.addEventListener('loadedmetadata', onMeta);
     vB.addEventListener('loadedmetadata', onMeta);
+    // Explicit sync on seek/loaded
+    vA.addEventListener('seeked', () => { if(Math.abs(vA.currentTime-vB.currentTime)>0.1) vB.currentTime = vA.currentTime; });
     window.addEventListener('resize', layout);
 
     vContainer.addEventListener('mousemove', (e) => {
@@ -246,12 +248,24 @@ function openCompareDialog(a, b) {
     // Touch support for slider (basic)
     vContainer.addEventListener('touchstart',track,false);
     vContainer.addEventListener('touchmove',track,false);
-    function sync(){if(vA.paused&&vB.paused)return;const d=Math.abs(vA.currentTime-vB.currentTime);if(d>0.1){vB.currentTime=vA.currentTime;}}
+    function sync(){
+        // if(vA.paused&&vB.paused)return; // Allow sync even when paused to align frames
+        const d=Math.abs(vA.currentTime-vB.currentTime);
+        if(d>0.1){vB.currentTime=vA.currentTime;}
+    }
     const syncTimer=setInterval(sync,100);
     const pauseBtn = content.querySelector('#ky-vc-pause');
     function togglePause() {
-        if (vA.paused) { vA.play(); vB.play(); pauseBtn.textContent = "⏸ Pause"; }
-        else { vA.pause(); vB.pause(); pauseBtn.textContent = "▶ Play"; }
+        if (vA.paused) {
+            vB.currentTime = vA.currentTime; // Sync before playing
+            vA.play(); vB.play();
+            pauseBtn.textContent = "⏸ Pause";
+        }
+        else {
+            vA.pause(); vB.pause();
+            vB.currentTime = vA.currentTime; // Sync after pausing
+            pauseBtn.textContent = "▶ Play";
+        }
     }
     pauseBtn.addEventListener('click', togglePause);
     

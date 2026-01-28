@@ -140,10 +140,12 @@
       const pauseBtn = document.getElementById('pause-btn');
       function togglePause() {
         if (videoA.paused) {
+            videoB.currentTime = videoA.currentTime; // Sync before playing
             videoA.play(); videoB.play();
             pauseBtn.innerText = "Pause";
         } else {
             videoA.pause(); videoB.pause();
+            videoB.currentTime = videoA.currentTime; // Sync after pausing
             pauseBtn.innerText = "Play";
         }
       }
@@ -247,13 +249,13 @@
       });
       // 处理视频播放同步
       function syncVideos() {
-        if (videoA.paused && videoB.paused) return;
-
-        const diff = Math.abs(videoA.currentTime - videoB.currentTime);
-        if (diff > 0.1) {
-          // 同步视频时间
-          videoB.currentTime = videoA.currentTime;
-        }
+          // if (videoA.paused && videoB.paused) return; // Allow sync when paused
+          
+          const diff = Math.abs(videoA.currentTime - videoB.currentTime);
+          if (diff > 0.1) {
+              // 同步视频时间
+              videoB.currentTime = videoA.currentTime;
+          }
       }
       // 定期同步视频
       setInterval(syncVideos, 100);
