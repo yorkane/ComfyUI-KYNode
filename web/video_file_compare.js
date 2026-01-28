@@ -146,11 +146,11 @@ function openCompareDialog(a, b) {
             <div id="ky-vc-container">
                 <div class="ky-vc-zoom-layer">
                     <video loop autoplay muted>
-                        <source id="ky-vc-a-src">
+                        <source id="ky-vc-b-src"> <!-- Background: Video B (Right) -->
                     </video>
                     <div id="ky-vc-clipper">
                         <video loop autoplay muted style="width:200%;z-index:3;">
-                            <source id="ky-vc-b-src">
+                            <source id="ky-vc-a-src"> <!-- Clipper: Video A (Left) -->
                         </video>
                     </div>
                 </div>
@@ -165,8 +165,9 @@ function openCompareDialog(a, b) {
     const bSrc = content.querySelector('#ky-vc-b-src');
     const vContainer = content.querySelector('#ky-vc-container');
     const clipper = content.querySelector('#ky-vc-clipper');
-    const vA = vContainer.getElementsByTagName('video')[0];
-    const vB = clipper.getElementsByTagName('video')[0];
+    // vBg is Background Video (B), vFg is Foreground Video (A - inside clipper)
+    const vBg = vContainer.getElementsByTagName('video')[0];
+    const vFg = clipper.getElementsByTagName('video')[0];
     const zoomLayer = vContainer.querySelector('.ky-vc-zoom-layer');
 
     function toStr(x){return (Array.isArray(x)?x.join(''):x||"").toString();}
@@ -174,8 +175,8 @@ function openCompareDialog(a, b) {
     inpB.value = toStr(b);
     aSrc.src = toStr(a);
     bSrc.src = toStr(b);
-    vA.load();
-    vB.load();
+    vBg.load();
+    vFg.load();
 
     let scale = 1, panX = 0, panY = 0, isDragging = false, lastX = 0, lastY = 0;
     function updateTransform() { zoomLayer.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`; }
@@ -185,23 +186,23 @@ function openCompareDialog(a, b) {
         const rect=zoomLayer.getBoundingClientRect();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const pos=(clientX-rect.left)/rect.width*100;
-        if(pos>=0 && pos<=100){clipper.style.width=pos+"%";vB.style.zIndex=3;}
+        if(pos>=0 && pos<=100){clipper.style.width=pos+"%";vFg.style.zIndex=3;}
     }
 
     function layout(){
         const cw = vContainer.clientWidth; const ch = vContainer.clientHeight;
-        const aw = vA.videoWidth||1920; const ah = vA.videoHeight||1080;
+        const aw = vFg.videoWidth||1920; const ah = vFg.videoHeight||1080;
         const ar = aw/ah; let tw, th;
         if (cw/ch > ar) { th = ch; tw = Math.round(ch*ar); } else { tw = cw; th = Math.round(cw/ar); }
         const left = Math.round((cw - tw)/2); const top = Math.round((ch - th)/2);
-        Object.assign(vA.style,{width:tw+"px",height:th+"px",left:left+"px",top:top+"px"});
-        Object.assign(vB.style,{width:tw+"px",height:th+"px",left:left+"px",top:top+"px"});
+        Object.assign(vBg.style,{width:tw+"px",height:th+"px",left:left+"px",top:top+"px"});
+        Object.assign(vFg.style,{width:tw+"px",height:th+"px",left:left+"px",top:top+"px"});
     }
     function onMeta(){layout();}
-    vA.addEventListener('loadedmetadata', onMeta);
-    vB.addEventListener('loadedmetadata', onMeta);
+    vBg.addEventListener('loadedmetadata', onMeta);
+    vFg.addEventListener('loadedmetadata', onMeta);
     // Explicit sync on seek/loaded
-    vA.addEventListener('seeked', () => { if(Math.abs(vA.currentTime-vB.currentTime)>0.1) vB.currentTime = vA.currentTime; });
+    vFg.addEventListener('seeked', () => { if(Math.abs(vFg.currentTime-vBg.currentTime)>0.1) vBg.currentTime = vFg.currentTime; }); // Main control is A (vFg) for seek
     window.addEventListener('resize', layout);
 
     vContainer.addEventListener('mousemove', (e) => {
@@ -249,28 +250,28 @@ function openCompareDialog(a, b) {
     vContainer.addEventListener('touchstart',track,false);
     vContainer.addEventListener('touchmove',track,false);
     function sync(){
-        // if(vA.paused&&vB.paused)return; // Allow sync even when paused to align frames
-        const d=Math.abs(vA.currentTime-vB.currentTime);
-        if(d>0.1){vB.currentTime=vA.currentTime;}
+        // if(vFg.paused&&vBg.paused)return; 
+        const d=Math.abs(vFg.currentTime-vBg.currentTime);
+        if(d>0.1){vBg.currentTime=vFg.currentTime;}
     }
     const syncTimer=setInterval(sync,100);
     const pauseBtn = content.querySelector('#ky-vc-pause');
     function togglePause() {
-        if (vA.paused) {
-            vB.currentTime = vA.currentTime; // Sync before playing
-            vA.play(); vB.play();
+        if (vFg.paused) {
+            vBg.currentTime = vFg.currentTime; 
+            vFg.play(); vBg.play();
             pauseBtn.textContent = "⏸ Pause";
         }
         else {
-            vA.pause(); vB.pause();
-            vB.currentTime = vA.currentTime; // Sync after pausing
+            vFg.pause(); vBg.pause();
+            vBg.currentTime = vFg.currentTime; 
             pauseBtn.textContent = "▶ Play";
         }
     }
     pauseBtn.addEventListener('click', togglePause);
     
     content.querySelector('#ky-vc-reload').addEventListener('click',()=>{
-        aSrc.src=inpA.value;bSrc.src=inpB.value;vA.load();vB.load();
+        aSrc.src=inpA.value;bSrc.src=inpB.value;vBg.load();vFg.load();
         pauseBtn.textContent = "⏸ Pause";
         scale = 1; panX = 0; panY = 0; updateTransform();
     });
@@ -328,9 +329,10 @@ function updateCompareDialog(a,b){
     aSrc.src = sa; bSrc.src = sb;
     const vContainer = content.querySelector('#ky-vc-container');
     const clipper = content.querySelector('#ky-vc-clipper');
-    const vA = vContainer.getElementsByTagName('video')[0];
-    const vB = clipper.getElementsByTagName('video')[0];
-    vA.load(); vB.load();
+    // Renaming here too for consistency, though this function just loads them
+    const vBg = vContainer.getElementsByTagName('video')[0];
+    const vFg = clipper.getElementsByTagName('video')[0];
+    vBg.load(); vFg.load();
 }
 
 function closeCompareDialog(){
@@ -360,9 +362,9 @@ function openImageCompareDialog(a, b){
         <div class="ky-vc-body">
             <div id="ky-vc-container">
                 <div class="ky-vc-zoom-layer">
-                    <img id="ky-ic-a">
+                    <img id="ky-ic-b"> <!-- Background: B -->
                     <div id="ky-vc-clipper">
-                        <img id="ky-ic-b" style="z-index:3;">
+                        <img id="ky-ic-a" style="z-index:3;"> <!-- Foreground: A -->
                     </div>
                 </div>
             </div>
@@ -391,7 +393,7 @@ function openImageCompareDialog(a, b){
         const rect=zoomLayer.getBoundingClientRect();
         const clientX = e.touches ? e.touches[0].clientX : e.clientX;
         const pos=(clientX-rect.left)/rect.width*100;
-        if(pos>=0 && pos<=100){clipper.style.width=pos+"%";imgB.style.zIndex=3;}
+        if(pos>=0 && pos<=100){clipper.style.width=pos+"%";imgFg.style.zIndex=3;}
     }
 
     function layout(){
@@ -452,7 +454,7 @@ function openImageCompareDialog(a, b){
     vContainer.addEventListener('touchstart',track,false);
     vContainer.addEventListener('touchmove',track,false);
     content.querySelector('#ky-vc-reload').addEventListener('click',()=>{
-        imgA.src=inpA.value;imgB.src=inpB.value;
+        imgFg.src=inpA.value;imgBg.src=inpB.value;
         scale = 1; panX = 0; panY = 0; updateTransform();
     });
     const closeBtn=content.querySelector('#ky-vc-close');
@@ -490,10 +492,10 @@ function updateImageCompareDialog(a,b){
     const content = vcDialog.querySelector('.ky-vc-content');
     const inpA = content.querySelector('#ky-vc-a');
     const inpB = content.querySelector('#ky-vc-b');
-    const imgA = content.querySelector('#ky-ic-a');
-    const imgB = content.querySelector('#ky-ic-b');
+    const imgFg = content.querySelector('#ky-ic-a');
+    const imgBg = content.querySelector('#ky-ic-b');
     function toStr(x){return (Array.isArray(x)?x.join(''):x||"").toString();}
     const sa = toStr(a); const sb = toStr(b);
     inpA.value = sa; inpB.value = sb;
-    imgA.src = sa; imgB.src = sb;
+    imgFg.src = sa; imgBg.src = sb;
 }
