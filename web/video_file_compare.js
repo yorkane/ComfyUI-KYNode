@@ -136,6 +136,7 @@ function openCompareDialog(a, b) {
             <button class="ky-vc-btn" id="ky-vc-close">✖ Close</button>
             <div class="ky-vc-controls">
                 <button class="ky-vc-btn primary" id="ky-vc-reload">🔄 Reload</button>
+                <button class="ky-vc-btn" id="ky-vc-pause">⏸ Pause</button>
                 <button class="ky-vc-btn" id="ky-vc-fs">⛶ FullScreen</button>
                 <input class="ky-vc-input" id="ky-vc-a" placeholder="Video A URL">
                 <input class="ky-vc-input" id="ky-vc-b" placeholder="Video B URL">
@@ -247,7 +248,18 @@ function openCompareDialog(a, b) {
     vContainer.addEventListener('touchmove',track,false);
     function sync(){if(vA.paused&&vB.paused)return;const d=Math.abs(vA.currentTime-vB.currentTime);if(d>0.1){vB.currentTime=vA.currentTime;}}
     const syncTimer=setInterval(sync,100);
-    content.querySelector('#ky-vc-reload').addEventListener('click',()=>{aSrc.src=inpA.value;bSrc.src=inpB.value;vA.load();vB.load();});
+    const pauseBtn = content.querySelector('#ky-vc-pause');
+    function togglePause() {
+        if (vA.paused) { vA.play(); vB.play(); pauseBtn.textContent = "⏸ Pause"; }
+        else { vA.pause(); vB.pause(); pauseBtn.textContent = "▶ Play"; }
+    }
+    pauseBtn.addEventListener('click', togglePause);
+    
+    content.querySelector('#ky-vc-reload').addEventListener('click',()=>{
+        aSrc.src=inpA.value;bSrc.src=inpB.value;vA.load();vB.load();
+        pauseBtn.textContent = "⏸ Pause";
+        scale = 1; panX = 0; panY = 0; updateTransform();
+    });
     const closeBtn=content.querySelector('#ky-vc-close');
     const fsBtn=content.querySelector('#ky-vc-fs');
     function close(){clearInterval(syncTimer);closeCompareDialog();}
@@ -276,6 +288,9 @@ function openCompareDialog(a, b) {
                 return;
             }
             close();
+        } else if (e.code === 'Space') {
+            e.preventDefault();
+            togglePause();
         } else if (e.key.toLowerCase()==='f') {
             e.preventDefault();
             if (!document.fullscreenElement) { content.requestFullscreen?.(); content.classList.add('ky-vc-fullscreen'); }
@@ -422,7 +437,10 @@ function openImageCompareDialog(a, b){
     // Touch support (basic)
     vContainer.addEventListener('touchstart',track,false);
     vContainer.addEventListener('touchmove',track,false);
-    content.querySelector('#ky-vc-reload').addEventListener('click',()=>{imgA.src=inpA.value;imgB.src=inpB.value;});
+    content.querySelector('#ky-vc-reload').addEventListener('click',()=>{
+        imgA.src=inpA.value;imgB.src=inpB.value;
+        scale = 1; panX = 0; panY = 0; updateTransform();
+    });
     const closeBtn=content.querySelector('#ky-vc-close');
     const fsBtn=content.querySelector('#ky-vc-fs');
     function close(){closeCompareDialog();}

@@ -80,6 +80,7 @@
   <body translate="no">
     <div class="controls">
       <button id="reload-btn">Reload</button>
+      <button id="pause-btn">Pause</button>
       <input
         type="text"
         id="videoA-url"
@@ -132,7 +133,27 @@
 
         videoA.load();
         videoB.load();
+        pauseBtn.innerText = "Pause";
+        scale = 1; panX = 0; panY = 0; updateTransform();
       }
+      
+      const pauseBtn = document.getElementById('pause-btn');
+      function togglePause() {
+        if (videoA.paused) {
+            videoA.play(); videoB.play();
+            pauseBtn.innerText = "Pause";
+        } else {
+            videoA.pause(); videoB.pause();
+            pauseBtn.innerText = "Play";
+        }
+      }
+      pauseBtn.addEventListener('click', togglePause);
+      document.addEventListener('keydown', (e) => {
+          if (e.code === 'Space') {
+              e.preventDefault();
+              togglePause();
+          }
+      });
 
       let scale = 1,
         panX = 0,
