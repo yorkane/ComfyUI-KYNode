@@ -201,8 +201,9 @@ function openCompareDialog(a, b) {
     function onMeta(){layout();}
     vBg.addEventListener('loadedmetadata', onMeta);
     vFg.addEventListener('loadedmetadata', onMeta);
-    // Explicit sync on seek/loaded
-    vFg.addEventListener('seeked', () => { if(Math.abs(vFg.currentTime-vBg.currentTime)>0.1) vBg.currentTime = vFg.currentTime; }); // Main control is A (vFg) for seek
+    function onMeta(){layout();}
+    vBg.addEventListener('loadedmetadata', onMeta);
+    vFg.addEventListener('loadedmetadata', onMeta);
     window.addEventListener('resize', layout);
 
     vContainer.addEventListener('mousemove', (e) => {
@@ -246,38 +247,53 @@ function openCompareDialog(a, b) {
         updateTransform();
     }, { passive: false });
 
-    // Touch support for slider (basic)
-    vContainer.addEventListener('touchstart',track,false);
-    vContainer.addEventListener('touchmove',track,false);
-    function sync(){
-        // if(vFg.paused&&vBg.paused)return; 
-        const d=Math.abs(vFg.currentTime-vBg.currentTime);
-        if(d>0.1){vBg.currentTime=vFg.currentTime;}
+    // Unified Sync Logic
+    function linkVideos(vMaster, vSlave) {
+        let dragging = false; 
+        
+        // Event Listeners
+        vMaster.addEventListener('play', () => { vSlave.play(); updatePlayBtn(); });
+        vMaster.addEventListener('pause', () => { vSlave.pause(); updatePlayBtn(); });
+        vMaster.addEventListener('seeking', () => { vSlave.currentTime = vMaster.currentTime; });
+        vMaster.addEventListener('seeked', () => { vSlave.currentTime = vMaster.currentTime; });
+        vMaster.addEventListener('ratechange', () => { vSlave.playbackRate = vMaster.playbackRate; });
+        
+        // Sync Loop
+        function loop() {
+            if (!vcDialog) return; // Stop if dialog closed
+            
+            if (!vMaster.paused && !vSlave.paused) {
+                 const diff = vSlave.currentTime - vMaster.currentTime;
+                 // If drift is > 1 frame (approx 0.04s at 25fps), snap
+                 if (Math.abs(diff) > 0.04) {
+                     vSlave.currentTime = vMaster.currentTime; 
+                 }
+            }
+            requestAnimationFrame(loop);
+        }
+        loop();
     }
-    const syncTimer=setInterval(sync,100);
+    
+    // Initialize Sync
+    linkVideos(vFg, vBg); // Fg is master (A), Bg is slave (B)
+
     const pauseBtn = content.querySelector('#ky-vc-pause');
+    function updatePlayBtn() {
+         pauseBtn.textContent = vFg.paused ? "▶ Play" : "⏸ Pause";
+    }
     function togglePause() {
-        if (vFg.paused) {
-            vBg.currentTime = vFg.currentTime; 
-            vFg.play(); vBg.play();
-            pauseBtn.textContent = "⏸ Pause";
-        }
-        else {
-            vFg.pause(); vBg.pause();
-            vBg.currentTime = vFg.currentTime; 
-            pauseBtn.textContent = "▶ Play";
-        }
+        if (vFg.paused) vFg.play();
+        else vFg.pause();
     }
     pauseBtn.addEventListener('click', togglePause);
     
     content.querySelector('#ky-vc-reload').addEventListener('click',()=>{
         aSrc.src=inpA.value;bSrc.src=inpB.value;vBg.load();vFg.load();
-        pauseBtn.textContent = "⏸ Pause";
         scale = 1; panX = 0; panY = 0; updateTransform();
     });
     const closeBtn=content.querySelector('#ky-vc-close');
     const fsBtn=content.querySelector('#ky-vc-fs');
-    function close(){clearInterval(syncTimer);closeCompareDialog();}
+    function close(){closeCompareDialog();}
     closeBtn.addEventListener('click',close);
     vcDialog.addEventListener('click',(e)=>{if(e.target===vcDialog) close();});
     fsBtn.addEventListener('click',()=>{

@@ -136,17 +136,38 @@
         scale = 1; panX = 0; panY = 0; updateTransform();
       }
       
+      // Unified Sync Logic
+      function linkVideos(vMaster, vSlave) {
+          // Event Listeners
+          vMaster.addEventListener('play', () => { vSlave.play(); updatePlayBtn(); });
+          vMaster.addEventListener('pause', () => { vSlave.pause(); updatePlayBtn(); });
+          vMaster.addEventListener('seeking', () => { vSlave.currentTime = vMaster.currentTime; });
+          vMaster.addEventListener('seeked', () => { vSlave.currentTime = vMaster.currentTime; });
+          vMaster.addEventListener('ratechange', () => { vSlave.playbackRate = vMaster.playbackRate; });
+          
+          // Sync Loop
+          function loop() {
+              if (!vMaster.paused && !vSlave.paused) {
+                   const diff = vSlave.currentTime - vMaster.currentTime;
+                   if (Math.abs(diff) > 0.04) {
+                       vSlave.currentTime = vMaster.currentTime; 
+                   }
+              }
+              requestAnimationFrame(loop);
+          }
+          loop();
+      }
+      
+      // Initialize Sync
+      linkVideos(videoFg, videoBg); // Fg is master (A), Bg is slave (B)
+
       const pauseBtn = document.getElementById('pause-btn');
+      function updatePlayBtn() {
+           pauseBtn.innerText = videoFg.paused ? "Play" : "Pause";
+      }
       function togglePause() {
-        if (videoA.paused) {
-            videoB.currentTime = videoA.currentTime; // Sync before playing
-            videoA.play(); videoB.play();
-            pauseBtn.innerText = "Pause";
-        } else {
-            videoA.pause(); videoB.pause();
-            videoB.currentTime = videoA.currentTime; // Sync after pausing
-            pauseBtn.innerText = "Play";
-        }
+          if (videoFg.paused) videoFg.play();
+          else videoFg.pause();
       }
       pauseBtn.addEventListener('click', togglePause);
       document.addEventListener('keydown', (e) => {
@@ -233,31 +254,8 @@
       document
         .getElementById("reload-btn")
         .addEventListener("click", reloadVideos);
-      // 视频加载完成后同步播放
-      videoA.addEventListener("loadeddata", function () {
-        if (videoB.readyState >= 3) {
-          videoA.play();
-          videoB.play();
-        }
-      });
-      videoB.addEventListener("loadeddata", function () {
-        if (videoA.readyState >= 3) {
-          videoA.play();
-          videoB.play();
-        }
-      });
-      // 处理视频播放同步
-      function syncVideos() {
-          // if (videoA.paused && videoB.paused) return; // Allow sync when paused
-          
-          const diff = Math.abs(videoA.currentTime - videoB.currentTime);
-          if (diff > 0.1) {
-              // 同步视频时间
-              videoB.currentTime = videoA.currentTime;
-          }
-      }
-      // 定期同步视频
-      setInterval(syncVideos, 100);
+      // cleanup old sync
+      // setInterval(syncVideos, 100);
     </script>
   </body>
 </html>
